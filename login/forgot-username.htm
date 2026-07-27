@@ -167,6 +167,24 @@
       margin-bottom:22px;
     }
 
+    .auth-message{
+      margin:0 0 16px;
+      padding:12px 14px;
+      border-radius:8px;
+      font-size:12px;
+      line-height:1.45;
+    }
+
+    .auth-message.error{
+      background:#f7dddd;
+      color:#a52a16;
+    }
+
+    .auth-message.success{
+      background:#e2f3e7;
+      color:#1d6b33;
+    }
+
     .field{
       margin-bottom:10px;
     }
@@ -323,33 +341,57 @@
         Confirm your email or text mobile number and we will send you an email with your username.
       </div>
 
-      <div class="radio-group">
-        <label class="radio-option">
-          <input type="radio" name="contact-method" value="email" checked>
-          Send email
-        </label>
-        <label class="radio-option">
-          <input type="radio" name="contact-method" value="text">
-          Text message
-        </label>
-      </div>
+      <div id="auth-message" class="auth-message" hidden></div>
 
-      <div class="field">
-        <input class="input" type="text" placeholder="Email Address">
-      </div>
+      <form action="/forgot-username" method="POST">
+        <div class="radio-group">
+          <label class="radio-option">
+            <input type="radio" name="contact-method" value="email" checked>
+            Send email
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="contact-method" value="text">
+            Text message
+          </label>
+        </div>
 
-      <div class="actions">
-        <button class="btn btn-primary" type="button">
-          <span class="btn-icon">→</span>
-          Send Code
-        </button>
+        <div class="field">
+          <input class="input" type="email" name="email" placeholder="Email Address *" autocomplete="email" required>
+        </div>
 
-        <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
-          <span class="btn-icon">×</span>
-          Cancel
-        </button>
-      </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-icon">→</span>
+            Send Code
+          </button>
+
+          <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
+            <span class="btn-icon">×</span>
+            Cancel
+          </button>
+        </div>
+      </form>
     </div>
   </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var error = params.get('error');
+      var success = params.get('success');
+      var message = document.getElementById('auth-message');
+
+      if (message) {
+        if (error) {
+          message.hidden = false;
+          message.className = 'auth-message error';
+          message.textContent = error;
+        } else if (success) {
+          message.hidden = false;
+          message.className = 'auth-message success';
+          message.textContent = success;
+        }
+      }
+    })();
+  </script>
 </body>
 </html>
