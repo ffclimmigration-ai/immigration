@@ -11,6 +11,8 @@
     :root{
       --orange:#e35205;
       --orange-dark:#cf4900;
+      --green:#1d6b33;
+      --green-bg:#e2f3e7;
       --bg:#f3f3f3;
       --text:#1f1f1f;
       --muted:#6f6f6f;
@@ -19,8 +21,9 @@
       --disabled:#a9a9a9;
       --cancel-bg:#f1dfd7;
       --cancel-text:#c24a16;
+      --error-bg:#f7dddd;
+      --error-text:#a52a16;
     }
-
     *{box-sizing:border-box}
     body{
       margin:0;
@@ -28,8 +31,6 @@
       background:var(--bg);
       color:var(--text);
     }
-
-    /* Header */
     .topbar{
       background:#000;
       height:60px;
@@ -45,7 +46,6 @@
       justify-content:space-between;
       align-items:center;
     }
-
     .realme-logo{
       display:flex;
       align-items:center;
@@ -80,9 +80,7 @@
       right:7px;
       top:8px;
     }
-    .realme-text{
-      line-height:1;
-    }
+    .realme-text{line-height:1}
     .realme-text .brand{
       font-size:18px;
       font-weight:700;
@@ -93,7 +91,6 @@
       color:#d8d8d8;
       margin-top:3px;
     }
-
     .nz-logo{
       color:#fff;
       text-align:right;
@@ -102,11 +99,7 @@
       font-weight:700;
       letter-spacing:0.02em;
     }
-    .nz-logo .top{
-      font-size:13px;
-    }
-
-    /* Back bar */
+    .nz-logo .top{font-size:13px}
     .backbar{
       background:#e9e9e9;
       border-bottom:1px solid #d8d8d8;
@@ -135,8 +128,6 @@
       font-size:10px;
       line-height:1;
     }
-
-    /* Main */
     .page{
       max-width:1200px;
       margin:0 auto;
@@ -146,36 +137,48 @@
       width:100%;
       max-width:680px;
     }
-
     h1{
       margin:0 0 10px;
       font-size:26px;
       font-weight:300;
       color:var(--orange);
     }
-
     .rule{
       border:none;
       border-top:1px solid var(--line);
       margin:0 0 16px;
     }
-
     .intro{
       font-size:11px;
       line-height:1.45;
       color:#333;
       margin-bottom:22px;
     }
-    .intro ul{
-      margin:6px 0 0 16px;
-      padding:0;
+    .intro ul{margin:6px 0 0 16px;padding:0}
+    .intro li{margin:2px 0}
+    .step{
+      display:none;
     }
-    .intro li{
-      margin:2px 0;
+    .step.is-visible{display:block}
+    .step-indicator{
+      display:flex;
+      gap:6px;
+      margin-bottom:18px;
     }
-
-    .field{
-      margin-bottom:10px;
+    .step-dot{
+      flex:1;
+      height:4px;
+      background:var(--border);
+      border-radius:2px;
+    }
+    .step-dot.is-active{background:var(--orange)}
+    .step-dot.is-done{background:var(--green)}
+    .field{margin-bottom:10px}
+    .field-row{
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:8px;
+      align-items:start;
     }
     .input{
       width:100%;
@@ -191,13 +194,19 @@
       border-color:#8a8a8a;
       box-shadow:0 0 0 2px rgba(227,82,5,.08);
     }
-
-    .error{
+    .input:disabled{background:#f5f5f5;color:#888}
+    .input.is-success{
+      border-color:#58a672;
+      background:var(--green-bg);
+      color:var(--green);
+    }
+    .error-inline{
       font-size:10px;
       color:#d12f1b;
       margin-top:4px;
+      display:none;
     }
-
+    .error-inline.show{display:block}
     .auth-message{
       margin:0 0 16px;
       padding:12px 14px;
@@ -205,17 +214,32 @@
       font-size:12px;
       line-height:1.45;
     }
-
-    .auth-message.error{
-      background:#f7dddd;
-      color:#a52a16;
+    .auth-message.error{background:var(--error-bg);color:var(--error-text)}
+    .auth-message.success{background:var(--green-bg);color:var(--green)}
+    .section-rule{
+      border:none;
+      border-top:1px solid var(--line);
+      margin:16px 0 14px;
     }
-
-    .auth-message.success{
-      background:#e2f3e7;
-      color:#1d6b33;
+    .section-title{
+      font-size:16px;
+      font-weight:700;
+      margin:0 0 10px;
     }
-
+    .password-text{
+      font-size:11px;
+      line-height:1.45;
+      color:#333;
+      margin-bottom:12px;
+    }
+    .password-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px 24px;
+      margin-top:8px;
+    }
+    .password-grid ul{margin:0;padding-left:16px}
+    .password-grid li{font-size:11px;margin:3px 0}
     .btn{
       height:28px;
       border:none;
@@ -226,16 +250,24 @@
       cursor:pointer;
       display:inline-flex;
       align-items:center;
+      justify-content:center;
       gap:8px;
     }
     .btn-primary{
       background:var(--orange);
       color:#fff;
     }
-    .btn-primary:hover{
-      background:var(--orange-dark);
+    .btn-primary:hover{background:var(--orange-dark)}
+    .btn-primary:disabled{
+      background:var(--disabled);
+      cursor:not-allowed;
     }
-
+    .btn-ghost{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--border);
+    }
+    .btn-ghost:hover{background:#fafafa}
     .btn-icon{
       width:14px;
       height:14px;
@@ -248,106 +280,39 @@
       font-weight:700;
       line-height:1;
     }
-
-    .section-rule{
-      border:none;
-      border-top:1px solid var(--line);
-      margin:16px 0 14px;
+    .btn-cancel{
+      background:var(--cancel-bg);
+      color:var(--cancel-text);
+      min-width:120px;
     }
-
-    .section-title{
-      font-size:16px;
-      font-weight:700;
-      margin:0 0 10px;
-    }
-
-    .password-text{
-      font-size:11px;
-      line-height:1.45;
-      color:#333;
-      margin-bottom:12px;
-    }
-
-    .password-grid{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px 24px;
-      margin-top:8px;
-    }
-
-    .password-grid ul{
-      margin:0;
-      padding-left:16px;
-    }
-
-    .password-grid li{
-      font-size:11px;
-      margin:3px 0;
-    }
-
+    .btn-cancel .btn-icon{background:#fff;color:var(--cancel-text)}
     .actions{
       display:flex;
       gap:10px;
       margin-top:18px;
       flex-wrap:wrap;
     }
-
-    .btn-continue{
-      background:var(--disabled);
-      color:#fff;
-      min-width:120px;
-      cursor:not-allowed;
+    .code-note{
+      font-size:10px;
+      color:var(--muted);
+      margin-top:6px;
     }
-
-    .btn-continue.is-ready{
-      background:var(--orange);
-      cursor:pointer;
-    }
-
-    .btn-continue.is-ready:hover{
-      background:var(--orange-dark);
-    }
-
-    .btn-cancel{
-      background:var(--cancel-bg);
-      color:var(--cancel-text);
-      min-width:120px;
-    }
-
-    .btn-cancel .btn-icon{
-      background:#fff;
-      color:var(--cancel-text);
-    }
-
-    /* Responsive */
+    .code-note strong{color:var(--orange)}
     @media (max-width:768px){
       .topbar{height:72px}
-      .topbar-inner{
-        padding:0 16px;
-      }
-      .page{
-        padding:22px 16px 40px;
-      }
-      .form-wrap{
-        max-width:none;
-      }
-      h1{
-        font-size:30px;
-      }
-      .password-grid{
-        grid-template-columns:1fr;
-      }
-      .actions{
-        flex-direction:column;
-      }
+      .topbar-inner{padding:0 16px}
+      .page{padding:22px 16px 40px}
+      .form-wrap{max-width:none}
+      h1{font-size:30px}
+      .actions{flex-direction:column}
       .btn{
         width:100%;
-        justify-content:center;
         height:40px;
         font-size:13px;
       }
+      .password-grid{grid-template-columns:1fr}
+      .field-row{grid-template-columns:1fr}
     }
-
     @media (max-width:480px){
       .realme-text .brand{font-size:16px}
       .nz-logo{font-size:10px}
@@ -367,7 +332,6 @@
           <div class="sub">Tēnei Au</div>
         </div>
       </div>
-
       <div class="nz-logo">
         <div class="top">NEW ZEALAND</div>
         <div>IMMIGRATION</div>
@@ -389,119 +353,287 @@
       <h1>Set up your account</h1>
       <hr class="rule">
 
-      <div class="intro">
-        To set up an account you will need to confirm your email address:
-        <ul>
-          <li>Enter your email address and click the Send Code button</li>
-          <li>Check your email to retrieve the Code</li>
-          <li>Enter the code in the Confirmation Code field</li>
-          <li>Click the Confirm Code button</li>
-        </ul>
+      <div class="step-indicator">
+        <div class="step-dot is-active" data-step="1"></div>
+        <div class="step-dot" data-step="2"></div>
+        <div class="step-dot" data-step="3"></div>
       </div>
 
       <div id="auth-message" class="auth-message" hidden></div>
 
-      <form id="signup-form" action="/register" method="POST">
-      <div class="field">
-        <input class="input" type="email" name="email" placeholder="Email Address *" autocomplete="email" required>
-        <div class="error">Email Address is required.</div>
-      </div>
+      <!-- STEP 1: Email + send code -->
+      <form id="step-email" class="step is-visible" onsubmit="return sendCode(event)">
+        <div class="intro">
+          To set up an account you will need to confirm your email address:
+          <ul>
+            <li>Enter your email address and click the Send Code button</li>
+            <li>Check your email to retrieve the Code</li>
+            <li>Enter the code in the Confirmation Code field</li>
+            <li>Click the Confirm Code button</li>
+          </ul>
+        </div>
 
-      <button class="btn btn-primary" type="button">
-        <span class="btn-icon">→</span>
-        Send Code
-      </button>
+        <div class="field">
+          <label for="email" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Email Address</label>
+          <input id="email" class="input" type="email" name="email" placeholder="you@example.com" autocomplete="email" required>
+          <div class="error-inline" id="email-error"></div>
+        </div>
 
-      <div class="field" style="margin-top:14px">
-        <input class="input" type="text" name="username" placeholder="Username *" autocomplete="username" minlength="4" required>
-        <div style="font-size:10px;color:#666;margin-top:4px">Minimum 4 characters.</div>
-      </div>
+        <div class="actions">
+          <button id="send-btn" class="btn btn-primary" type="submit">
+            <span class="btn-icon">→</span>
+            Send Code
+          </button>
+          <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
+            <span class="btn-icon">×</span>
+            Cancel
+          </button>
+        </div>
+        <div class="code-note" id="code-note" hidden></div>
+      </form>
 
-      <hr class="section-rule">
+      <!-- STEP 2: Confirm verification code -->
+      <form id="step-confirm" class="step" onsubmit="return confirmCode(event)">
+        <div class="section-title">Confirm your email</div>
+        <div class="intro" style="margin-bottom:12px">
+          Enter the 6-digit verification code that was sent to <strong id="confirmed-email"></strong>.
+        </div>
 
-      <h2 class="section-title">Password</h2>
+        <div class="field">
+          <label for="email-2" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Email Address</label>
+          <input id="email-2" class="input is-success" type="email" name="email" readonly>
+        </div>
 
-      <div class="password-text">
-        Your password must be between 8 and 64 characters long. It must contain at least three (3) of the below:
-      </div>
+        <div class="field">
+          <label for="code" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Confirmation Code</label>
+          <input id="code" class="input" type="text" name="code" placeholder="123456" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" autocomplete="one-time-code" required>
+          <div class="error-inline" id="code-error"></div>
+        </div>
 
-      <div class="password-grid">
-        <ul>
-          <li>uppercase (A–Z)</li>
-          <li>lowercase (a–z)</li>
-        </ul>
-        <ul>
-          <li>numbers (0–9)</li>
-          <li>symbols (@ # $ % ^ &amp; * - _ ! + = [ ] { } | \ : ; ? / ~ ` ( ) &lt; &gt;)</li>
-        </ul>
-      </div>
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-icon">✓</span>
+            Confirm Code
+          </button>
+          <button class="btn btn-ghost" type="button" onclick="gotoStep(1); return false;">
+            Change email
+          </button>
+        </div>
+        <div class="code-note" id="confirm-note" hidden></div>
+      </form>
 
-      <div class="field" style="margin-top:16px">
-        <input class="input" type="password" name="password" placeholder="Password *" autocomplete="new-password" minlength="8" required>
-      </div>
+      <!-- STEP 3: Username + password (final submit to /register) -->
+      <form id="step-account" class="step" action="/register" method="POST">
+        <div class="section-title">Create your account</div>
+        <div class="intro" style="margin-bottom:12px">
+          Email confirmed: <strong id="final-email" style="color:var(--green)"></strong>
+        </div>
 
-      <div class="field">
-        <input class="input" type="password" name="confirmPassword" placeholder="Password (again) *" autocomplete="new-password" minlength="8" required>
-      </div>
+        <input type="hidden" name="email" id="register-email">
 
-      <div class="actions">
-        <button id="continue-button" class="btn btn-continue" type="submit" disabled>
-          <span class="btn-icon">✓</span>
-          Continue
-        </button>
+        <div class="field">
+          <label for="username" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Username</label>
+          <input id="username" class="input" type="text" name="username" placeholder="Username" autocomplete="username" minlength="4" required>
+          <div style="font-size:10px;color:#666;margin-top:4px">Minimum 4 characters.</div>
+        </div>
 
-        <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
-          <span class="btn-icon">×</span>
-          Cancel
-        </button>
-      </div>
+        <hr class="section-rule">
+
+        <h2 class="section-title">Password</h2>
+        <div class="password-text">
+          Your password must be between 8 and 64 characters long. It must contain at least three (3) of the below:
+        </div>
+        <div class="password-grid">
+          <ul>
+            <li>uppercase (A–Z)</li>
+            <li>lowercase (a–z)</li>
+          </ul>
+          <ul>
+            <li>numbers (0–9)</li>
+            <li>symbols (@ # $ % ^ &amp; * - _ ! + =)</li>
+          </ul>
+        </div>
+
+        <div class="field" style="margin-top:16px">
+          <label for="password" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Password</label>
+          <input id="password" class="input" type="password" name="password" placeholder="Password" autocomplete="new-password" minlength="8" required>
+        </div>
+
+        <div class="field">
+          <label for="confirmPassword" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Password (again)</label>
+          <input id="confirmPassword" class="input" type="password" name="confirmPassword" placeholder="Password (again)" autocomplete="new-password" minlength="8" required>
+        </div>
+
+        <div class="actions">
+          <button id="continue-button" class="btn btn-primary" type="submit" disabled>
+            <span class="btn-icon">✓</span>
+            Create Account
+          </button>
+          <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
+            <span class="btn-icon">×</span>
+            Cancel
+          </button>
+        </div>
       </form>
     </div>
   </main>
-  <script>
-    (function () {
-      var params = new URLSearchParams(window.location.search);
-      var error = params.get('error');
-      var success = params.get('success');
-      var message = document.getElementById('auth-message');
-      var form = document.getElementById('signup-form');
-      var continueButton = document.getElementById('continue-button');
 
-      if (message) {
-        if (error) {
-          message.hidden = false;
-          message.className = 'auth-message error';
-          message.textContent = error;
-        } else if (success) {
-          message.hidden = false;
-          message.className = 'auth-message success';
-          message.textContent = success;
-        }
-      }
+<script>
+(function () {
+  var params = new URLSearchParams(window.location.search);
+  var error = params.get('error');
+  var success = params.get('success');
+  var message = document.getElementById('auth-message');
 
-      if (!form || !continueButton) {
-        return;
-      }
+  if (message) {
+    if (error) {
+      message.hidden = false;
+      message.className = 'auth-message error';
+      message.textContent = error;
+    } else if (success) {
+      message.hidden = false;
+      message.className = 'auth-message success';
+      message.textContent = success;
+    }
+  }
 
-      function updateButtonState() {
-        var email = form.elements.email.value.trim();
-        var username = form.elements.username.value.trim();
-        var password = form.elements.password.value;
-        var confirmPassword = form.elements.confirmPassword.value;
-        var ready =
-          email.length > 0 &&
-          username.length >= 4 &&
-          password.length >= 8 &&
-          confirmPassword.length >= 8 &&
-          password === confirmPassword;
+  var continueButton = document.getElementById('continue-button');
+  var accountForm = document.getElementById('step-account');
 
-        continueButton.disabled = !ready;
-        continueButton.classList.toggle('is-ready', ready);
-      }
+  function updateButtonState() {
+    if (!accountForm || !continueButton) return;
+    var username = (accountForm.elements.username.value || '').trim();
+    var password = accountForm.elements.password.value || '';
+    var confirmPassword = accountForm.elements.confirmPassword.value || '';
+    var ready =
+      username.length >= 4 &&
+      password.length >= 8 &&
+      confirmPassword.length >= 8 &&
+      password === confirmPassword;
+    continueButton.disabled = !ready;
+  }
 
-      form.addEventListener('input', updateButtonState);
-      updateButtonState();
-    })();
-  </script>
+  if (accountForm) {
+    accountForm.addEventListener('input', updateButtonState);
+    updateButtonState();
+  }
+})();
+
+function setAuthMessage(text, type) {
+  var m = document.getElementById('auth-message');
+  if (!m) return;
+  if (!text) { m.hidden = true; m.textContent = ''; return; }
+  m.hidden = false;
+  m.className = 'auth-message ' + (type === 'error' ? 'error' : 'success');
+  m.textContent = text;
+}
+
+function setInline(id, text) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  if (!text) { el.classList.remove('show'); el.textContent = ''; return; }
+  el.classList.add('show');
+  el.textContent = text;
+}
+
+function setStepDots(active) {
+  document.querySelectorAll('.step-dot').forEach(function (d) {
+    var n = parseInt(d.getAttribute('data-step'), 10);
+    d.classList.remove('is-active', 'is-done');
+    if (n < active) d.classList.add('is-done');
+    else if (n === active) d.classList.add('is-active');
+  });
+}
+
+function gotoStep(n) {
+  document.querySelectorAll('.step').forEach(function (s) { s.classList.remove('is-visible'); });
+  var el = document.getElementById(
+    n === 1 ? 'step-email' : n === 2 ? 'step-confirm' : 'step-account'
+  );
+  if (el) el.classList.add('is-visible');
+  setStepDots(n);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function sendCode(e) {
+  e.preventDefault();
+  setAuthMessage('', '');
+  setInline('email-error', '');
+
+  var emailEl = document.getElementById('email');
+  var btn = document.getElementById('send-btn');
+  var email = (emailEl.value || '').trim();
+  if (!email) { setInline('email-error', 'Email Address is required.'); return false; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="btn-icon">…</span>Sending…';
+  try {
+    var r = await fetch('/send-verification-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ email: email }).toString(),
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok) {
+      setInline('email-error', (data && data.error) || 'Unable to send code. Try again.');
+      return false;
+    }
+    // Populate the confirm step
+    document.getElementById('email-2').value = email;
+    document.getElementById('confirmed-email').textContent = email;
+    var note = document.getElementById('confirm-note');
+    if (note && data && data.demoCode) {
+      note.hidden = false;
+      note.innerHTML = 'Demo mode — your verification code is: <strong>' + data.demoCode + '</strong> (logged in server too)';
+    }
+    setAuthMessage(data.message || 'Verification code sent. Check your email.', 'success');
+    gotoStep(2);
+    return false;
+  } catch (err) {
+    setAuthMessage(err.message || 'Network error. Please try again.', 'error');
+    return false;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span class="btn-icon">→</span>Send Code';
+  }
+}
+
+async function confirmCode(e) {
+  e.preventDefault();
+  setAuthMessage('', '');
+  setInline('code-error', '');
+
+  var email = (document.getElementById('email-2').value || '').trim();
+  var code = (document.getElementById('code').value || '').trim();
+  if (!email || !code) {
+    setInline('code-error', 'Please enter the 6-digit code.');
+    return false;
+  }
+
+  try {
+    var r = await fetch('/confirm-verification-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ email: email, code: code }).toString(),
+    });
+    var data = {};
+    try { data = await r.json(); } catch (_) {}
+    if (!r.ok) {
+      setInline('code-error', (data && data.error) || 'Invalid code. Try again.');
+      return false;
+    }
+    // Move to final step, prefill the email hidden input + label
+    document.getElementById('register-email').value = email;
+    document.getElementById('final-email').textContent = email;
+    setAuthMessage(data.message || 'Email confirmed. Now choose a username and password.', 'success');
+    gotoStep(3);
+    return false;
+  } catch (err) {
+    setAuthMessage(err.message || 'Network error. Please try again.', 'error');
+    return false;
+  }
+}
+</script>
 </body>
 </html>

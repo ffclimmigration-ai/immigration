@@ -200,6 +200,85 @@ app.get('/login/forgot-password', (req, res) => {
   res.sendFile(path.join(__dirname, 'login', 'forgot-password.htm'));
 });
 
+// ---------- Email verification for signup ----------
+const verificationCodes = new Map(); // emailLower → { code, expires, verified }
+
+function generateVerificationCode() {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+}
+
+app.post('/send-verification-code', async (req, res) => {
+  const email = normalizeValue(req.body.email);
+
+  if (!email) {
+    return res.status(400).json({ error: 'Email address is required.' });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return res.status(400).json({ error: 'Please enter a valid email address.' });
+  }
+
+  try {
+    // Optional: block already-registered emails
+    const existing = await findUserByField('emailLower', email.toLowerCase());
+    if (existing) {
+      return res.status(400).json({ error: 'That email address is already registered.' });
+    }
+
+    const code = generateVerificationCode();
+    const key = email.toLowerCase();
+
+    verificationCodes.set(key, {
+      code,
+      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      verified: false,
+    });
+
+    // Demo style (same as your forgot-password flow).
+    // Replace later with a real email service (nodemailer, SendGrid, etc.).
+    console.log(`[Verification] Code for ${email}: ${code}`);
+
+    return res.json({
+      success: true,
+      message: `A verification code has been sent to ${email}.`,
+      // Remove demoCode in production once real email is wired up
+      demoCode: code,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      error: error.message || 'Unable to send verification code right now.',
+    });
+  }
+});
+
+app.post('/confirm-verification-code', (req, res) => {
+  const email = normalizeValue(req.body.email);
+  const code = normalizeValue(req.body.code);
+
+  if (!email || !code) {
+    return res.status(400).json({ error: 'Email and confirmation code are required.' });
+  }
+
+  const key = email.toLowerCase();
+  const entry = verificationCodes.get(key);
+
+  if (!entry || entry.code !== code || Date.now() > entry.expires) {
+    return res.status(400).json({ error: 'Invalid or expired confirmation code.' });
+  }
+
+  // Mark as verified so /register can accept it
+  entry.verified = true;
+  entry.expires = Date.now() + 30 * 60 * 1000; // keep verified state for 30 min
+  verificationCodes.set(key, entry);
+
+  return res.json({
+    success: true,
+    message: 'Email address confirmed successfully.',
+  });
+});
+
+// ---------- Register (now requires verified email) ----------
 app.post('/register', async (req, res) => {
   const email = normalizeValue(req.body.email);
   const username = normalizeValue(req.body.username);
@@ -208,6 +287,17 @@ app.post('/register', async (req, res) => {
 
   if (!email || !username || !password || !confirmPassword) {
     res.redirect(buildRedirect('/login/signup', { error: 'All fields are required.' }));
+    return;
+  }
+
+  // Require email verification
+  const verification = verificationCodes.get(email.toLowerCase());
+  if (!verification || !verification.verified || Date.now() > verification.expires) {
+    res.redirect(
+      buildRedirect('/login/signup', {
+        error: 'Please verify your email address before creating an account.',
+      })
+    );
     return;
   }
 
@@ -263,6 +353,10 @@ app.post('/register', async (req, res) => {
     };
 
     await userRef.set(user);
+
+    // Clean up the verification entry
+    verificationCodes.delete(email.toLowerCase());
+
     setUserCookie(res, user);
     res.redirect('/dashboard');
   } catch (error) {
