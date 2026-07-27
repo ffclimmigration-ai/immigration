@@ -4,6 +4,7 @@
   "description": "Immigration New Zealand portal with login",
   "main": "server.js",
   "scripts": {
+    "build": "node scripts/prepare-vercel-static.js",
     "start": "node server.js",
     "dev": "node server.js"
   },

@@ -116,20 +116,95 @@ function verifyPassword(password, salt, expectedHash) {
   );
 }
 
-async function findUserByField(field, value) {
-  const firestore = ensureFirebaseReady();
-  const snapshot = await firestore
-    .collection('users')
-    .where(field, '==', value)
-    .limit(1)
-    .get();
+function isFirebaseConfigured() {
+  return !!db;
+}
 
-  if (snapshot.empty) {
-    return null;
+// In-memory fallback store for DEMO mode (when Firebase is not configured).
+// All reads/writes are lost when server restarts. Enable signup/login to work
+// out-of-the-box without any credentials. Swap to Firestore automatically
+// once FIREBASE_PROJECT_ID / CLIENT_EMAIL / PRIVATE_KEY are set in .env.
+const demoUsersByUid = new Map();
+const demoUsersByUsername = new Map();
+const demoUsersByEmail = new Map();
+
+async function findUserByField(field, value) {
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const snapshot = await firestore
+      .collection('users')
+      .where(field, '==', value)
+      .limit(1)
+      .get();
+
+    if (snapshot.empty) {
+      return null;
+    }
+
+    const doc = snapshot.docs[0];
+    return { uid: doc.id, ...doc.data() };
   }
 
-  const doc = snapshot.docs[0];
-  return { uid: doc.id, ...doc.data() };
+  switch (field) {
+    case 'usernameLower':
+      return demoUsersByUsername.get(String(value).toLowerCase()) || null;
+    case 'emailLower':
+      return demoUsersByEmail.get(String(value).toLowerCase()) || null;
+    default:
+      return null;
+  }
+}
+
+async function createUser(userData) {
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const userRef = firestore.collection('users').doc();
+    const record = {
+      ...userData,
+      uid: userRef.id,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await userRef.set(record);
+    return { ...record, uid: userRef.id };
+  }
+
+  const uid = crypto.randomBytes(12).toString('hex');
+  const record = { ...userData, uid, createdAt: Date.now() };
+  demoUsersByUid.set(uid, record);
+  if (record.usernameLower) demoUsersByUsername.set(record.usernameLower, record);
+  if (record.emailLower) demoUsersByEmail.set(record.emailLower, record);
+  return record;
+}
+
+async function updateUserPassword(uid, passwordHash, passwordSalt) {
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    await firestore
+      .collection('users')
+      .doc(uid)
+      .update({
+        passwordHash,
+        passwordSalt,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    return;
+  }
+
+  const record = demoUsersByUid.get(uid);
+  if (!record) return;
+  record.passwordHash = passwordHash;
+  record.passwordSalt = passwordSalt;
+  record.updatedAt = Date.now();
+}
+
+async function findUserByUidResetFallback(email, username) {
+  if (!isFirebaseConfigured()) {
+    const byEmail = email ? demoUsersByEmail.get(String(email).toLowerCase()) : null;
+    if (byEmail) return byEmail;
+    const byUser = username ? demoUsersByUsername.get(String(username).toLowerCase()) : null;
+    if (byUser) return byUser;
+  }
+  return null;
 }
 
 function isAuthenticated(req, res, next) {
@@ -221,9 +296,11 @@ app.post('/send-verification-code', async (req, res) => {
 
   try {
     // Optional: block already-registered emails
-    const existing = await findUserByField('emailLower', email.toLowerCase());
-    if (existing) {
-      return res.status(400).json({ error: 'That email address is already registered.' });
+    if (isFirebaseConfigured()) {
+      const existing = await findUserByField('emailLower', email.toLowerCase());
+      if (existing) {
+        return res.status(400).json({ error: 'That email address is already registered.' });
+      }
     }
 
     const code = generateVerificationCode();
@@ -321,27 +398,26 @@ app.post('/register', async (req, res) => {
   }
 
   try {
-    const existingUsername = await findUserByField('usernameLower', username.toLowerCase());
-    if (existingUsername) {
-      res.redirect(
-        buildRedirect('/login/signup', { error: 'That username is already registered.' })
-      );
-      return;
-    }
+    if (isFirebaseConfigured()) {
+      const existingUsername = await findUserByField('usernameLower', username.toLowerCase());
+      if (existingUsername) {
+        res.redirect(
+          buildRedirect('/login/signup', { error: 'That username is already registered.' })
+        );
+        return;
+      }
 
-    const existingEmail = await findUserByField('emailLower', email.toLowerCase());
-    if (existingEmail) {
-      res.redirect(
-        buildRedirect('/login/signup', { error: 'That email address is already registered.' })
-      );
-      return;
+      const existingEmail = await findUserByField('emailLower', email.toLowerCase());
+      if (existingEmail) {
+        res.redirect(
+          buildRedirect('/login/signup', { error: 'That email address is already registered.' })
+        );
+        return;
+      }
     }
 
     const { salt, hash } = hashPassword(password);
-    const firestore = ensureFirebaseReady();
-    const userRef = firestore.collection('users').doc();
-    const user = {
-      uid: userRef.id,
+    const userObj = {
       username,
       usernameLower: username.toLowerCase(),
       email,
@@ -349,10 +425,8 @@ app.post('/register', async (req, res) => {
       name: username,
       passwordHash: hash,
       passwordSalt: salt,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-
-    await userRef.set(user);
+    const user = await createUser(userObj);
 
     // Clean up the verification entry
     verificationCodes.delete(email.toLowerCase());
@@ -378,7 +452,10 @@ app.post('/login', async (req, res) => {
   }
 
   try {
-    const user = await findUserByField('usernameLower', username.toLowerCase());
+    let user = await findUserByField('usernameLower', username.toLowerCase());
+    if (!user && !isFirebaseConfigured()) {
+      user = demoUsersByUsername.get(username.toLowerCase()) || null;
+    }
     if (!user || !verifyPassword(password, user.passwordSalt, user.passwordHash)) {
       res.redirect(buildRedirect('/login', { error: 'Invalid username or password.' }));
       return;
@@ -794,15 +871,14 @@ app.post('/reset-password', async (req, res) => {
     }
 
     const { salt, hash } = hashPassword(password);
-    const firestore = ensureFirebaseReady();
-    await firestore
-      .collection('users')
-      .doc(entry.uid)
-      .update({
-        passwordHash: hash,
-        passwordSalt: salt,
-        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
+    await updateUserPassword(entry.uid, hash, salt);
+
+    if (!isFirebaseConfigured() && !demoUsersByUid.has(entry.uid)) {
+      const fallbackUser = await findUserByUidResetFallback(email, username);
+      if (fallbackUser) {
+        await updateUserPassword(fallbackUser.uid, hash, salt);
+      }
+    }
 
     resetCodes.delete(key);
     res.redirect(
