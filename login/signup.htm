@@ -341,7 +341,7 @@
 
   <div class="backbar">
     <div class="backbar-inner">
-      <a href="/login" class="backlink">
+      <a href="/login" class="backlink" id="back-to-login-link">
         <span class="back-icon">←</span>
         Go back to Immigration New Zealand
       </a>
@@ -384,7 +384,7 @@
             <span class="btn-icon">→</span>
             Send Code
           </button>
-          <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
+          <button class="btn btn-cancel" type="button" id="cancel-step-email">
             <span class="btn-icon">×</span>
             Cancel
           </button>
@@ -430,6 +430,7 @@
         </div>
 
         <input type="hidden" name="email" id="register-email">
+        <input type="hidden" name="returnTo" id="register-return-to">
 
         <div class="field">
           <label for="username" style="font-size:11px;font-weight:600;margin-bottom:4px;display:block">Username</label>
@@ -469,7 +470,7 @@
             <span class="btn-icon">✓</span>
             Create Account
           </button>
-          <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
+          <button class="btn btn-cancel" type="button" id="cancel-step-account">
             <span class="btn-icon">×</span>
             Cancel
           </button>
@@ -483,7 +484,26 @@
   var params = new URLSearchParams(window.location.search);
   var error = params.get('error');
   var success = params.get('success');
+  var returnTo = params.get('returnTo');
   var message = document.getElementById('auth-message');
+  var registerReturnTo = document.getElementById('register-return-to');
+  var loginHref = '/login' + (returnTo ? '?returnTo=' + encodeURIComponent(returnTo) : '');
+
+  ['back-to-login-link', 'cancel-step-email', 'cancel-step-account'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.tagName === 'A') {
+      el.setAttribute('href', loginHref);
+    } else {
+      el.addEventListener('click', function () {
+        window.location.href = loginHref;
+      });
+    }
+  });
+
+  if (registerReturnTo) {
+    registerReturnTo.value = returnTo || '';
+  }
 
   if (message) {
     if (error) {
@@ -516,6 +536,15 @@
   if (accountForm) {
     accountForm.addEventListener('input', updateButtonState);
     updateButtonState();
+  }
+
+  if (error || success) {
+    if (window.history && window.history.replaceState) {
+      var cleanParams = new URLSearchParams();
+      if (returnTo) cleanParams.set('returnTo', returnTo);
+      var nextUrl = window.location.pathname + (cleanParams.toString() ? '?' + cleanParams.toString() : '');
+      window.history.replaceState({}, document.title, nextUrl);
+    }
   }
 })();
 

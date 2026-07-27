@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Control Centre - Immigration New Zealand</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#08111f;
+      --panel:#0f1b2d;
+      --line:#233554;
+      --text:#edf3ff;
+      --muted:#91a1bc;
+      --accent:#ff6a1a;
+      --accent-soft:rgba(255,106,26,.14);
+      --green:#24c58a;
+      --yellow:#f0b429;
+      --red:#ff6b6b;
+      --blue:#5aa8ff;
+      --shadow:0 22px 60px rgba(0,0,0,.35);
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:"Inter",Arial,sans-serif;
+      background:
+        radial-gradient(circle at top right, rgba(255,106,26,.12), transparent 28%),
+        radial-gradient(circle at top left, rgba(90,168,255,.10), transparent 24%),
+        linear-gradient(180deg,#07101c 0%, #091321 100%);
+      color:var(--text);
+      min-height:100vh;
+    }
+    a{color:#9dd1ff}
+    .shell{
+      display:grid;
+      grid-template-columns:280px minmax(0,1fr);
+      min-height:100vh;
+    }
+    .sidebar{
+      border-right:1px solid rgba(255,255,255,.06);
+      background:rgba(7,15,26,.82);
+      backdrop-filter:blur(16px);
+      padding:28px 22px;
+      position:sticky;
+      top:0;
+      height:100vh;
+    }
+    .brand{display:flex;align-items:center;gap:14px;margin-bottom:26px}
+    .brand-mark{
+      width:48px;height:48px;border-radius:14px;display:grid;place-items:center;
+      background:linear-gradient(135deg,var(--accent),#ff8a4c);color:#fff;font-weight:800;font-size:18px;
+      box-shadow:0 14px 30px rgba(255,106,26,.28);
+    }
+    .brand h1{margin:0;font-size:18px;letter-spacing:-.02em}
+    .brand p{margin:4px 0 0;font-size:12px;color:var(--muted)}
+    .admin-badge{
+      display:inline-flex;align-items:center;gap:8px;font-size:12px;font-weight:700;letter-spacing:.08em;
+      text-transform:uppercase;padding:8px 10px;border-radius:999px;background:var(--accent-soft);
+      color:#ffd5bd;border:1px solid rgba(255,106,26,.22);margin-bottom:28px;
+    }
+    .side-links{display:grid;gap:10px}
+    .side-links a{
+      text-decoration:none;color:#d7e2f4;background:rgba(255,255,255,.03);
+      border:1px solid transparent;border-radius:14px;padding:14px 16px;transition:.18s ease;
+    }
+    .side-links a:hover,.side-links a.active{
+      background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.08);transform:translateX(2px);
+    }
+    .side-links strong{display:block;font-size:14px;margin-bottom:4px}
+    .side-links span{display:block;font-size:12px;color:var(--muted);line-height:1.45}
+    .sidebar-footer{
+      position:absolute;left:22px;right:22px;bottom:24px;font-size:12px;color:var(--muted);line-height:1.6;
+      padding-top:18px;border-top:1px solid rgba(255,255,255,.06);
+    }
+    .main{padding:26px}
+    .hero{
+      background:linear-gradient(135deg,rgba(255,106,26,.24),rgba(16,27,46,.92));
+      border:1px solid rgba(255,255,255,.08);border-radius:28px;padding:28px 30px;margin-bottom:24px;
+      box-shadow:var(--shadow);display:grid;gap:18px;
+    }
+    .hero-top{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;flex-wrap:wrap}
+    .hero h2{margin:0;font-size:34px;letter-spacing:-.04em}
+    .hero p{margin:10px 0 0;max-width:760px;color:#d6dfef;line-height:1.7}
+    .hero-actions{display:flex;gap:10px;flex-wrap:wrap}
+    .hero-actions a{
+      text-decoration:none;padding:12px 16px;border-radius:14px;font-weight:600;background:#fff;color:#0d1525;
+    }
+    .hero-actions a.secondary{background:rgba(255,255,255,.08);color:#fff;border:1px solid rgba(255,255,255,.1)}
+    .flash{
+      padding:14px 16px;border-radius:14px;font-size:14px;font-weight:500;border:1px solid transparent;
+    }
+    .flash-success{background:rgba(36,197,138,.14);border-color:rgba(36,197,138,.24);color:#b8f5dd}
+    .flash-error{background:rgba(255,107,107,.14);border-color:rgba(255,107,107,.24);color:#ffd5d5}
+    .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:24px}
+    .stat-card{
+      background:rgba(15,27,45,.9);border:1px solid rgba(255,255,255,.07);border-radius:22px;padding:22px;
+      box-shadow:var(--shadow);
+    }
+    .stat-label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px}
+    .stat-value{font-size:34px;font-weight:800;letter-spacing:-.04em}
+    .stat-note{margin-top:10px;font-size:13px;color:#c8d2e4}
+    .layout{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.85fr);gap:22px;align-items:start}
+    .panel{
+      background:rgba(15,27,45,.9);border:1px solid rgba(255,255,255,.07);border-radius:24px;padding:22px;
+      box-shadow:var(--shadow);
+    }
+    .panel h3{margin:0 0 8px;font-size:20px;letter-spacing:-.02em}
+    .panel p.lead{margin:0 0 18px;color:var(--muted);line-height:1.6}
+    .queue-list{display:grid;gap:16px}
+    .queue-card{border:1px solid rgba(255,255,255,.07);border-radius:20px;padding:18px;background:rgba(255,255,255,.02)}
+    .queue-top{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+    .queue-eyebrow{font-size:11px;color:#8fbef6;text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+    .queue-card h3{margin:0 0 8px;font-size:21px}
+    .queue-summary{margin:0;color:#c6d4eb;line-height:1.6}
+    .queue-badges{display:flex;gap:10px;flex-wrap:wrap}
+    .status-pill,.priority-pill{
+      display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:999px;
+      font-size:12px;font-weight:700;text-transform:capitalize;border:1px solid transparent;
+    }
+    .status-pending{background:rgba(240,180,41,.14);color:#ffe4a2;border-color:rgba(240,180,41,.24)}
+    .status-in_review{background:rgba(90,168,255,.14);color:#cde5ff;border-color:rgba(90,168,255,.24)}
+    .status-approved{background:rgba(36,197,138,.14);color:#c7ffea;border-color:rgba(36,197,138,.24)}
+    .status-needs_info{background:rgba(255,106,26,.14);color:#ffd7bf;border-color:rgba(255,106,26,.24)}
+    .status-rejected{background:rgba(255,107,107,.14);color:#ffd2d2;border-color:rgba(255,107,107,.24)}
+    .priority-high{background:rgba(255,107,107,.12);color:#ffc0c0}
+    .priority-medium{background:rgba(240,180,41,.12);color:#ffe9af}
+    .priority-low{background:rgba(90,168,255,.12);color:#d3e8ff}
+    .queue-meta{
+      margin:16px 0 0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 16px;
+      font-size:13px;color:#a9bbd6;
+    }
+    .queue-meta strong{color:#fff;font-weight:600;margin-right:8px}
+    .queue-body{display:grid;grid-template-columns:minmax(0,.9fr) minmax(280px,1.1fr);gap:18px;margin-top:18px}
+    .queue-history h4,.queue-form label{font-size:13px;font-weight:700;color:#eaf2ff;margin:0 0 10px;display:block}
+    .queue-history ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+    .queue-history li{
+      padding:12px 14px;border-radius:16px;background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.05)
+    }
+    .queue-history li span{display:block;font-size:12px;color:#88a0c2;margin-top:4px}
+    .queue-history li p{margin:8px 0 0;font-size:13px;color:#d3deef;line-height:1.55}
+    .queue-form textarea{
+      width:100%;min-height:128px;resize:vertical;border-radius:16px;border:1px solid rgba(255,255,255,.08);
+      background:#0a1423;color:#edf3ff;padding:14px 16px;font:inherit;line-height:1.55;
+    }
+    .queue-form textarea:focus{outline:none;border-color:rgba(255,106,26,.48);box-shadow:0 0 0 3px rgba(255,106,26,.12)}
+    .queue-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+    .btn{
+      border:none;border-radius:14px;padding:12px 14px;font:inherit;font-weight:700;cursor:pointer;color:#fff;
+    }
+    .btn-approve{background:linear-gradient(135deg,#1fa86f,#24c58a)}
+    .btn-review{background:linear-gradient(135deg,#2e7adf,#5aa8ff)}
+    .btn-request{background:linear-gradient(135deg,#d86b1d,#ff8a4c)}
+    .btn-reject{background:linear-gradient(135deg,#c94c4c,#ff6b6b)}
+    .table{width:100%;border-collapse:collapse;font-size:14px}
+    .table th,.table td{text-align:left;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+    .table th{color:#8ca3c4;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+    .timeline{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+    .timeline li{display:flex;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)}
+    .timeline li div{display:grid;gap:4px}
+    .timeline strong{font-size:14px}
+    .timeline span,.timeline time{font-size:12px;color:#8ca3c4}
+    .system-grid{display:grid;gap:12px}
+    .system-item{
+      padding:14px 16px;border-radius:16px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.05)
+    }
+    .system-item strong{display:block;margin-bottom:4px}
+    .empty-state{padding:28px;border-radius:20px;border:1px dashed rgba(255,255,255,.14);text-align:center;color:var(--muted)}
+    @media (max-width:1180px){
+      .shell{grid-template-columns:1fr}
+      .sidebar{position:relative;height:auto;border-right:none;border-bottom:1px solid rgba(255,255,255,.06)}
+      .sidebar-footer{position:static;margin-top:24px}
+      .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+      .layout{grid-template-columns:1fr}
+    }
+    @media (max-width:760px){
+      .main{padding:16px}
+      .hero{padding:22px}
+      .hero h2{font-size:28px}
+      .stats{grid-template-columns:1fr}
+      .queue-meta,.queue-body{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">INZ</div>
+        <div>
+          <h1>Admin Control Centre</h1>
+          <p>Website operations and approvals</p>
+        </div>
+      </div>
+      <div class="admin-badge">Official Admin</div>
+      <nav class="side-links">
+        <a class="active" href="/admin"><strong>Overview</strong><span>Live metrics, approval queue, user operations.</span></a>
+        <a href="#queue"><strong>Approval Queue</strong><span>Review pending, in-progress, and resolved items.</span></a>
+        <a href="#users"><strong>Portal Users</strong><span>Track registrations and access activity.</span></a>
+        <a href="#activity"><strong>Activity Feed</strong><span>Audit trail of recent admin actions.</span></a>
+        <a href="/apply"><strong>New Application</strong><span>Open the live website intake form used by applicants.</span></a>
+        <a href="/dashboard"><strong>User Dashboard</strong><span>Return to the standard signed-in experience.</span></a>
+        <a href="/logout"><strong>Sign Out</strong><span>Exit the control centre securely.</span></a>
+      </nav>
+      <div class="sidebar-footer">
+        Logged in as <strong>{{CURRENT_USER}}</strong><br>
+        Storage mode: <strong>{{STORAGE_MODE}}</strong>
+      </div>
+    </aside>
+
+    <main class="main">
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <h2>Professional Admin Workspace</h2>
+            <p>Manage portal approvals, track registered users, and handle operational decisions from a single control surface built directly into the Immigration website.</p>
+          </div>
+          <div class="hero-actions">
+            <a href="#queue">Open Queue</a>
+            <a href="#users" class="secondary">View Users</a>
+          </div>
+        </div>
+        {{FLASH}}
+      </section>
+
+      <section class="stats">
+        <div class="stat-card">
+          <div class="stat-label">Pending approvals</div>
+          <div class="stat-value">{{PENDING_COUNT}}</div>
+          <div class="stat-note">Items waiting for a decision right now.</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">In review</div>
+          <div class="stat-value">{{IN_REVIEW_COUNT}}</div>
+          <div class="stat-note">Applications currently under manual assessment.</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Approved</div>
+          <div class="stat-value">{{APPROVED_COUNT}}</div>
+          <div class="stat-note">Resolved approvals currently recorded in the system.</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Urgent items</div>
+          <div class="stat-value">{{URGENT_COUNT}}</div>
+          <div class="stat-note">High-priority submissions needing fast attention.</div>
+        </div>
+      </section>
+
+      <section class="layout">
+        <div class="panel" id="queue">
+          <h3>Approval Queue</h3>
+          <p class="lead">Review website-related submissions, account access requests, and approval workflows without leaving the portal.</p>
+          <div class="queue-list">
+            {{APPLICATION_MARKUP}}
+          </div>
+        </div>
+
+        <div style="display:grid;gap:22px">
+          <section class="panel" id="users">
+            <h3>Registered Users</h3>
+            <p class="lead">Newest portal accounts available to the admin team.</p>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Username</th>
+                  <th>Joined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{USER_MARKUP}}
+              </tbody>
+            </table>
+          </section>
+
+          <section class="panel" id="activity">
+            <h3>Recent Activity</h3>
+            <p class="lead">Latest actions captured in the approval history.</p>
+            <ul class="timeline">{{ACTIVITY_MARKUP}}</ul>
+          </section>
+
+          <section class="panel">
+            <h3>System Status</h3>
+            <p class="lead">Quick operational view of the admin environment.</p>
+            <div class="system-grid">
+              <div class="system-item">
+                <strong>Authentication</strong>
+                Cookie-protected admin area active.
+              </div>
+              <div class="system-item">
+                <strong>Approval storage</strong>
+                {{APPROVAL_STORAGE_TEXT}}
+              </div>
+              <div class="system-item">
+                <strong>Primary admin account</strong>
+                {{PRIMARY_ADMIN}}
+              </div>
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

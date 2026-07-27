@@ -162,14 +162,17 @@ async function createUser(userData) {
     const record = {
       ...userData,
       uid: userRef.id,
+      createdAtMs: Date.now(),
+      updatedAtMs: Date.now(),
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
     };
     await userRef.set(record);
     return { ...record, uid: userRef.id };
   }
 
+  const now = Date.now();
   const uid = crypto.randomBytes(12).toString('hex');
-  const record = { ...userData, uid, createdAt: Date.now() };
+  const record = { ...userData, uid, createdAt: now, createdAtMs: now, updatedAtMs: now };
   demoUsersByUid.set(uid, record);
   if (record.usernameLower) demoUsersByUsername.set(record.usernameLower, record);
   if (record.emailLower) demoUsersByEmail.set(record.emailLower, record);
@@ -185,6 +188,7 @@ async function updateUserPassword(uid, passwordHash, passwordSalt) {
       .update({
         passwordHash,
         passwordSalt,
+        updatedAtMs: Date.now(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
     return;
@@ -207,11 +211,354 @@ async function findUserByUidResetFallback(email, username) {
   return null;
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderTemplateFile(relativePath, replacements = {}) {
+  const filePath = path.join(__dirname, relativePath);
+  let template = fs.readFileSync(filePath, 'utf8');
+
+  Object.entries(replacements).forEach(([key, value]) => {
+    template = template.split(`{{${key}}}`).join(String(value ?? ''));
+  });
+
+  return template;
+}
+
+function sanitizeReturnTo(value, fallback = '/dashboard') {
+  const candidate = normalizeValue(value);
+  if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//')) {
+    return fallback;
+  }
+
+  return candidate;
+}
+
+function humanizeSlug(value) {
+  return normalizeValue(value)
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function inferSourcePath(req, explicitValue = '') {
+  let candidate = sanitizeReturnTo(explicitValue, '');
+
+  if (!candidate) {
+    const referer = req.get('referer');
+    if (referer) {
+      try {
+        candidate = sanitizeReturnTo(new URL(referer).pathname, '');
+      } catch (error) {
+        candidate = '';
+      }
+    }
+  }
+
+  return candidate || '/';
+}
+
+function inferSourceLabel(sourcePath, explicitTitle = '') {
+  const cleanTitle = normalizeValue(explicitTitle);
+  if (cleanTitle) {
+    return cleanTitle;
+  }
+
+  const cleanPath = sanitizeReturnTo(sourcePath, '/');
+  const segments = cleanPath.split('/').filter(Boolean);
+  if (!segments.length) {
+    return 'Immigration New Zealand';
+  }
+
+  let lastSegment = segments[segments.length - 1];
+  if (/^index\.html?$/i.test(lastSegment) && segments.length > 1) {
+    lastSegment = segments[segments.length - 2];
+  }
+
+  return humanizeSlug(lastSegment) || 'Immigration New Zealand';
+}
+
+function getTimestampMs(value) {
+  if (!value) return 0;
+  if (typeof value === 'number') return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value.toMillis === 'function') return value.toMillis();
+  if (typeof value.seconds === 'number') return value.seconds * 1000;
+  return 0;
+}
+
+function formatDateTime(ms) {
+  if (!ms) return 'Just now';
+  return new Intl.DateTimeFormat('en-NZ', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(ms));
+}
+
+const ADMIN_EMAILS = new Set([
+  'ffclimmigration@gmail.com',
+  normalizeValue(process.env.ADMIN_EMAIL || '').toLowerCase(),
+].filter(Boolean));
+
+function isAdminUser(user) {
+  if (!user) return false;
+  const email = normalizeValue(user.email).toLowerCase();
+  const username = normalizeValue(user.username).toLowerCase();
+  return ADMIN_EMAILS.has(email) || username === 'admin' || username === 'officialimmigration';
+}
+
+function requireAdmin(req, res, next) {
+  if (!isAdminUser(req.user)) {
+    res.status(403).send(`
+      <!doctype html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Admin Access Required</title>
+        <style>
+          body{margin:0;font-family:Inter,Arial,sans-serif;background:#0d1117;color:#f4f7fb;display:grid;place-items:center;min-height:100vh;padding:24px}
+          .card{max-width:560px;background:#111826;border:1px solid #273244;border-radius:20px;padding:32px;box-shadow:0 18px 60px rgba(0,0,0,.35)}
+          h1{margin:0 0 12px;font-size:28px;color:#ff8a4c}
+          p{margin:0 0 18px;line-height:1.6;color:#b7c0cd}
+          a{display:inline-block;padding:12px 18px;border-radius:12px;background:#e35205;color:#fff;text-decoration:none;font-weight:600}
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>Admin Access Required</h1>
+          <p>This area is reserved for the official Immigration control team. Sign in with an approved administrator account to manage approvals and website operations.</p>
+          <a href="/dashboard">Return to dashboard</a>
+        </div>
+      </body>
+      </html>
+    `);
+    return;
+  }
+
+  next();
+}
+
+const demoApplications = new Map();
+
+function seedDemoApplications() {
+  if (demoApplications.size > 0) return;
+
+  const now = Date.now();
+  [
+    {
+      id: 'demo-aewv-review',
+      title: 'Accredited Employer Work Visa Review',
+      type: 'Visa Approval',
+      applicantName: 'Mia Thompson',
+      applicantEmail: 'mia.thompson@example.com',
+      sourcePath: '/www.immigration.govt.nz/visas/accredited-employer-work-visa/index.htm',
+      summary: 'Awaiting final review for employer accreditation evidence and wage validation.',
+      status: 'pending',
+      priority: 'high',
+      submittedAtMs: now - 1000 * 60 * 50,
+      updatedAtMs: now - 1000 * 60 * 50,
+      history: [],
+    },
+    {
+      id: 'demo-family-visa',
+      title: 'Family Residence Supporting Documents',
+      type: 'Document Review',
+      applicantName: 'Daniel Okafor',
+      applicantEmail: 'daniel.okafor@example.com',
+      sourcePath: '/live/resident-visas-to-live-in-new-zealand',
+      summary: 'Medical and police certificate set submitted for review by compliance team.',
+      status: 'in_review',
+      priority: 'medium',
+      submittedAtMs: now - 1000 * 60 * 180,
+      updatedAtMs: now - 1000 * 60 * 70,
+      history: [
+        {
+          atMs: now - 1000 * 60 * 70,
+          action: 'Moved to in review',
+          actor: 'System',
+          note: 'Assigned to case management queue.',
+        },
+      ],
+    },
+    {
+      id: 'demo-portal-access',
+      title: 'Portal Account Approval',
+      type: 'Account Approval',
+      applicantName: 'Aisha Bello',
+      applicantEmail: 'aisha.bello@example.com',
+      sourcePath: '/login/signup',
+      summary: 'New portal account registration waiting for administrator approval.',
+      status: 'needs_info',
+      priority: 'low',
+      submittedAtMs: now - 1000 * 60 * 420,
+      updatedAtMs: now - 1000 * 60 * 100,
+      history: [
+        {
+          atMs: now - 1000 * 60 * 100,
+          action: 'Requested more information',
+          actor: 'System',
+          note: 'Awaiting passport image upload.',
+        },
+      ],
+    },
+  ].forEach(application => {
+    demoApplications.set(application.id, application);
+  });
+}
+
+async function listPortalUsers() {
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection('users').get();
+    return snapshot.docs
+      .map(doc => ({ uid: doc.id, ...doc.data() }))
+      .sort((a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0));
+  }
+
+  return [...demoUsersByUid.values()].sort(
+    (a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0)
+  );
+}
+
+async function listApplications() {
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection('applications').get();
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => (b.updatedAtMs || b.submittedAtMs || 0) - (a.updatedAtMs || a.submittedAtMs || 0));
+  }
+
+  seedDemoApplications();
+  return [...demoApplications.values()].sort(
+    (a, b) => (b.updatedAtMs || b.submittedAtMs || 0) - (a.updatedAtMs || a.submittedAtMs || 0)
+  );
+}
+
+async function listApplicationsForUser(user) {
+  const allApplications = await listApplications();
+  const email = normalizeValue(user && user.email).toLowerCase();
+  const uid = normalizeValue(user && user.uid);
+
+  return allApplications.filter(application => {
+    const applicantEmail = normalizeValue(application.applicantEmail).toLowerCase();
+    const submittedByUid = normalizeValue(application.submittedByUid);
+    return (email && applicantEmail === email) || (uid && submittedByUid === uid);
+  });
+}
+
+async function createApplicationRecord(applicationData) {
+  const now = Date.now();
+  const baseRecord = {
+    title: applicationData.title,
+    type: applicationData.type || 'General Review',
+    applicantName: applicationData.applicantName,
+    applicantEmail: applicationData.applicantEmail,
+    applicantUsername: applicationData.applicantUsername || '',
+    submittedByUid: applicationData.submittedByUid || '',
+    sourcePath: applicationData.sourcePath || '/',
+    sourceLabel: applicationData.sourceLabel || inferSourceLabel(applicationData.sourcePath || '/'),
+    summary: applicationData.summary || '',
+    documentChecklist: applicationData.documentChecklist || '',
+    requestedStartDate: applicationData.requestedStartDate || '',
+    status: applicationData.status || 'pending',
+    priority: applicationData.priority || 'medium',
+    submittedAtMs: now,
+    updatedAtMs: now,
+    history: [
+      {
+        atMs: now,
+        action: 'Created',
+        actor: 'System',
+        note: 'Application added to approval queue.',
+      },
+    ],
+  };
+
+  if (isFirebaseConfigured()) {
+    const docRef = ensureFirebaseReady().collection('applications').doc();
+    const record = {
+      ...baseRecord,
+      id: docRef.id,
+      submittedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await docRef.set(record);
+    return record;
+  }
+
+  const record = {
+    ...baseRecord,
+    id: applicationData.id || crypto.randomBytes(8).toString('hex'),
+  };
+  demoApplications.set(record.id, record);
+  return record;
+}
+
+async function updateApplicationStatus(id, status, reviewer, note) {
+  const cleanStatus = normalizeValue(status) || 'pending';
+  const cleanNote = normalizeValue(note);
+  const event = {
+    atMs: Date.now(),
+    action:
+      cleanStatus === 'approved'
+        ? 'Approved'
+        : cleanStatus === 'rejected'
+          ? 'Rejected'
+          : cleanStatus === 'needs_info'
+            ? 'Requested more information'
+            : 'Moved to in review',
+    actor: reviewer.name || reviewer.username || reviewer.email || 'Administrator',
+    note: cleanNote || 'No reviewer note supplied.',
+  };
+
+  if (isFirebaseConfigured()) {
+    const docRef = ensureFirebaseReady().collection('applications').doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      throw new Error('Approval item not found.');
+    }
+    const application = snapshot.data();
+    const history = Array.isArray(application.history) ? application.history : [];
+    await docRef.set(
+      {
+        status: cleanStatus,
+        reviewerName: reviewer.name || reviewer.username || reviewer.email,
+        reviewerEmail: reviewer.email || '',
+        reviewerNote: cleanNote,
+        updatedAtMs: event.atMs,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        history: [...history, event],
+      },
+      { merge: true }
+    );
+    return;
+  }
+
+  seedDemoApplications();
+  const application = demoApplications.get(id);
+  if (!application) {
+    throw new Error('Approval item not found.');
+  }
+  application.status = cleanStatus;
+  application.reviewerName = reviewer.name || reviewer.username || reviewer.email;
+  application.reviewerEmail = reviewer.email || '';
+  application.reviewerNote = cleanNote;
+  application.updatedAtMs = event.atMs;
+  application.history = [...(application.history || []), event];
+  demoApplications.set(id, application);
+}
+
 function isAuthenticated(req, res, next) {
   const user = getCookieUser(req);
 
   if (!user) {
-    res.redirect('/login');
+    res.redirect(buildRedirect('/login', { returnTo: req.originalUrl || req.url || '/dashboard' }));
     return;
   }
 
@@ -361,9 +708,10 @@ app.post('/register', async (req, res) => {
   const username = normalizeValue(req.body.username);
   const password = normalizeValue(req.body.password);
   const confirmPassword = normalizeValue(req.body.confirmPassword);
+  const returnTo = sanitizeReturnTo(req.body.returnTo, '/dashboard');
 
   if (!email || !username || !password || !confirmPassword) {
-    res.redirect(buildRedirect('/login/signup', { error: 'All fields are required.' }));
+    res.redirect(buildRedirect('/login/signup', { error: 'All fields are required.', returnTo }));
     return;
   }
 
@@ -373,6 +721,7 @@ app.post('/register', async (req, res) => {
     res.redirect(
       buildRedirect('/login/signup', {
         error: 'Please verify your email address before creating an account.',
+        returnTo,
       })
     );
     return;
@@ -381,6 +730,7 @@ app.post('/register', async (req, res) => {
   if (username.length < 4) {
     res.redirect(
       buildRedirect('/login/signup', { error: 'Username must be at least 4 characters.' })
+      .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
     );
     return;
   }
@@ -388,12 +738,13 @@ app.post('/register', async (req, res) => {
   if (password.length < 8) {
     res.redirect(
       buildRedirect('/login/signup', { error: 'Password must be at least 8 characters.' })
+      .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
     );
     return;
   }
 
   if (password !== confirmPassword) {
-    res.redirect(buildRedirect('/login/signup', { error: 'Passwords do not match.' }));
+    res.redirect(buildRedirect('/login/signup', { error: 'Passwords do not match.', returnTo }));
     return;
   }
 
@@ -403,6 +754,7 @@ app.post('/register', async (req, res) => {
       if (existingUsername) {
         res.redirect(
           buildRedirect('/login/signup', { error: 'That username is already registered.' })
+            .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
         );
         return;
       }
@@ -411,6 +763,7 @@ app.post('/register', async (req, res) => {
       if (existingEmail) {
         res.redirect(
           buildRedirect('/login/signup', { error: 'That email address is already registered.' })
+            .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
         );
         return;
       }
@@ -428,15 +781,33 @@ app.post('/register', async (req, res) => {
     };
     const user = await createUser(userObj);
 
+    try {
+      await createApplicationRecord({
+        title: `Portal access request for ${username}`,
+        type: 'Account Approval',
+        applicantName: username,
+        applicantEmail: email,
+        applicantUsername: username,
+        submittedByUid: user.uid,
+        sourcePath: '/login/signup',
+        sourceLabel: 'Portal account registration',
+        summary: 'New user registration created through the portal and ready for admin review.',
+        priority: 'medium',
+      });
+    } catch (applicationError) {
+      console.error('Unable to create admin approval record:', applicationError.message);
+    }
+
     // Clean up the verification entry
     verificationCodes.delete(email.toLowerCase());
 
     setUserCookie(res, user);
-    res.redirect('/dashboard');
+    res.redirect(returnTo);
   } catch (error) {
     res.redirect(
       buildRedirect('/login/signup', {
         error: error.message || 'Unable to create your account right now.',
+        returnTo,
       })
     );
   }
@@ -445,9 +816,10 @@ app.post('/register', async (req, res) => {
 app.post('/login', async (req, res) => {
   const username = normalizeValue(req.body.username);
   const password = normalizeValue(req.body.password);
+  const returnTo = sanitizeReturnTo(req.body.returnTo || req.query.returnTo, '/dashboard');
 
   if (!username || !password) {
-    res.redirect(buildRedirect('/login', { error: 'Enter your username and password.' }));
+    res.redirect(buildRedirect('/login', { error: 'Enter your username and password.', returnTo }));
     return;
   }
 
@@ -457,16 +829,17 @@ app.post('/login', async (req, res) => {
       user = demoUsersByUsername.get(username.toLowerCase()) || null;
     }
     if (!user || !verifyPassword(password, user.passwordSalt, user.passwordHash)) {
-      res.redirect(buildRedirect('/login', { error: 'Invalid username or password.' }));
+      res.redirect(buildRedirect('/login', { error: 'Invalid username or password.', returnTo }));
       return;
     }
 
     setUserCookie(res, user);
-    res.redirect('/dashboard');
+    res.redirect(returnTo);
   } catch (error) {
     res.redirect(
       buildRedirect('/login', {
         error: error.message || 'Unable to sign you in right now.',
+        returnTo,
       })
     );
   }
@@ -481,6 +854,18 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
   const displayName = req.user.name || req.user.username;
   const userName = req.user.username;
   const userEmail = req.user.email;
+  const canAccessAdmin = isAdminUser(req.user);
+  const adminNav = canAccessAdmin ? '<a href="/admin">Admin</a>' : '';
+  const adminCard = canAccessAdmin
+    ? `
+          <a href="/admin" class="action-card">
+            <div class="icon">🛡️</div>
+            <h3>Admin Control</h3>
+            <p>Review website approvals, monitor portal users, and manage operational decisions in one place.</p>
+            <div class="arrow">→</div>
+          </a>
+      `
+    : '';
 
   res.send(`
     <!doctype html>
@@ -705,6 +1090,7 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
             <a href="/visas">Visas</a>
             <a href="/apply">Apply</a>
             <a href="/dashboard" class="active">Dashboard</a>
+            ${adminNav}
             <a href="/logout" class="logout">Logout</a>
           </nav>
         </div>
@@ -749,11 +1135,268 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
             <p>End your session and protect your account information when using shared devices.</p>
             <div class="arrow">→</div>
           </a>
+          ${adminCard}
         </section>
       </main>
     </body>
     </html>
   `);
+});
+
+app.get('/apply', isAuthenticated, async (req, res) => {
+  try {
+    const sourcePath = inferSourcePath(req, req.query.source || req.query.sourcePath);
+    const sourceLabel = inferSourceLabel(sourcePath, req.query.title);
+    const recentApplications = (await listApplicationsForUser(req.user)).slice(0, 6);
+    const success = normalizeValue(req.query.success);
+    const error = normalizeValue(req.query.error);
+    const flash = success
+      ? `<div class="flash flash-success">${escapeHtml(success)}</div>`
+      : error
+        ? `<div class="flash flash-error">${escapeHtml(error)}</div>`
+        : '';
+    const selectedType = normalizeValue(req.query.type) || 'Work Visa';
+    const selectedPriority = normalizeValue(req.query.priority) || 'medium';
+    const visaTypes = ['Work Visa', 'Visitor Visa', 'Student Visa', 'Residence Visa', 'Citizenship', 'Portal Access', 'Document Review'];
+    const priorityOptions = ['low', 'medium', 'high'];
+    const recentMarkup = recentApplications.length
+      ? recentApplications.map(application => `
+          <li>
+            <strong>${escapeHtml(application.title)}</strong>
+            <span>${escapeHtml((application.status || 'pending').replace('_', ' '))} · ${escapeHtml(formatDateTime(application.updatedAtMs || application.submittedAtMs || getTimestampMs(application.updatedAt)))}</span>
+            <p>${escapeHtml(application.summary || 'No summary recorded.')}</p>
+          </li>
+        `).join('')
+      : '<li><strong>No submissions yet</strong><span>New applications will appear here once you send them to the queue.</span><p>Your next submission will be visible to the admin team immediately.</p></li>';
+
+    res.send(
+      renderTemplateFile('templates/application-form.html', {
+        FLASH: flash,
+        APPLICANT_NAME: escapeHtml(req.user.name || req.user.username),
+        APPLICANT_EMAIL: escapeHtml(req.user.email || ''),
+        APPLICANT_USERNAME: escapeHtml(req.user.username || ''),
+        SOURCE_PATH: escapeHtml(sourcePath),
+        SOURCE_LABEL: escapeHtml(sourceLabel),
+        DEFAULT_APPLICATION_TITLE: escapeHtml(req.query.title || `${sourceLabel} application`),
+        DEFAULT_SUMMARY: escapeHtml(req.query.summary || `Application started from ${sourceLabel}. Please review the submitted eligibility details and supporting information.`),
+        DEFAULT_DOCUMENTS: '',
+        REQUESTED_START_DATE: '',
+        VISA_TYPE_OPTIONS: visaTypes
+          .map(type => `<option value="${escapeHtml(type)}"${type === selectedType ? ' selected' : ''}>${escapeHtml(type)}</option>`)
+          .join(''),
+        PRIORITY_OPTIONS: priorityOptions
+          .map(priority => `<option value="${priority}"${priority === selectedPriority ? ' selected' : ''}>${escapeHtml(humanizeSlug(priority))}</option>`)
+          .join(''),
+        RECENT_APPLICATIONS: recentMarkup,
+      })
+    );
+  } catch (error) {
+    res.status(500).send(`Unable to load the application form: ${escapeHtml(error.message)}`);
+  }
+});
+
+app.post('/apply', isAuthenticated, async (req, res) => {
+  const sourcePath = inferSourcePath(req, req.body.sourcePath);
+  const applicationTitle = normalizeValue(req.body.applicationTitle);
+  const visaType = normalizeValue(req.body.visaType) || 'General Review';
+  const priority = ['low', 'medium', 'high'].includes(normalizeValue(req.body.priority).toLowerCase())
+    ? normalizeValue(req.body.priority).toLowerCase()
+    : 'medium';
+  const requestedStartDate = normalizeValue(req.body.requestedStartDate);
+  const summary = normalizeValue(req.body.summary);
+  const documentChecklist = normalizeValue(req.body.documentChecklist);
+
+  if (!applicationTitle || !summary) {
+    res.redirect(
+      buildRedirect('/apply', {
+        error: 'Application title and summary are required.',
+        source: sourcePath,
+        title: applicationTitle || inferSourceLabel(sourcePath),
+        type: visaType,
+        priority,
+      })
+    );
+    return;
+  }
+
+  try {
+    await createApplicationRecord({
+      title: applicationTitle,
+      type: visaType,
+      applicantName: req.user.name || req.user.username,
+      applicantEmail: req.user.email,
+      applicantUsername: req.user.username,
+      submittedByUid: req.user.uid,
+      sourcePath,
+      sourceLabel: inferSourceLabel(sourcePath, applicationTitle),
+      summary,
+      documentChecklist,
+      requestedStartDate,
+      priority,
+      status: 'pending',
+    });
+
+    res.redirect(
+      buildRedirect('/apply', {
+        success: 'Application submitted to the approval queue successfully.',
+        source: sourcePath,
+        title: applicationTitle,
+        type: visaType,
+      })
+    );
+  } catch (error) {
+    res.redirect(
+      buildRedirect('/apply', {
+        error: error.message || 'Unable to submit the application right now.',
+        source: sourcePath,
+        title: applicationTitle || inferSourceLabel(sourcePath),
+        type: visaType,
+        priority,
+      })
+    );
+  }
+});
+
+app.get('/admin', isAuthenticated, requireAdmin, async (req, res) => {
+  try {
+    const applications = await listApplications();
+    const users = await listPortalUsers();
+    const pendingCount = applications.filter(item => item.status === 'pending').length;
+    const inReviewCount = applications.filter(item => item.status === 'in_review').length;
+    const approvedCount = applications.filter(item => item.status === 'approved').length;
+    const urgentCount = applications.filter(item => item.priority === 'high').length;
+    const latestUsers = users.slice(0, 8);
+    const latestActivity = applications
+      .flatMap(app =>
+        (app.history || []).map(event => ({
+          ...event,
+          applicationTitle: app.title,
+        }))
+      )
+      .sort((a, b) => (b.atMs || 0) - (a.atMs || 0))
+      .slice(0, 8);
+    const success = normalizeValue(req.query.success);
+    const error = normalizeValue(req.query.error);
+    const flash = success
+      ? `<div class="flash flash-success">${escapeHtml(success)}</div>`
+      : error
+        ? `<div class="flash flash-error">${escapeHtml(error)}</div>`
+        : '';
+
+    const applicationMarkup = applications.length
+      ? applications.map(app => {
+          const statusClass = `status-${escapeHtml(app.status)}`;
+          const priorityClass = `priority-${escapeHtml(app.priority)}`;
+          const historyHtml = (app.history || [])
+            .slice()
+            .sort((a, b) => (b.atMs || 0) - (a.atMs || 0))
+            .slice(0, 3)
+            .map(event => `
+                <li>
+                  <strong>${escapeHtml(event.action)}</strong>
+                  <span>${escapeHtml(event.actor)} · ${escapeHtml(formatDateTime(event.atMs))}</span>
+                  <p>${escapeHtml(event.note || '')}</p>
+                </li>
+              `)
+            .join('');
+
+          return `
+            <article class="queue-card">
+              <div class="queue-top">
+                <div>
+                  <div class="queue-eyebrow">${escapeHtml(app.type || 'Review')}</div>
+                  <h3>${escapeHtml(app.title)}</h3>
+                  <p class="queue-summary">${escapeHtml(app.summary || 'No summary provided.')}</p>
+                </div>
+                <div class="queue-badges">
+                  <span class="status-pill ${statusClass}">${escapeHtml((app.status || 'pending').replace('_', ' '))}</span>
+                  <span class="priority-pill ${priorityClass}">${escapeHtml(app.priority || 'medium')} priority</span>
+                </div>
+              </div>
+              <div class="queue-meta">
+                <span><strong>Applicant</strong> ${escapeHtml(app.applicantName || 'Unknown')}</span>
+                <span><strong>Email</strong> ${escapeHtml(app.applicantEmail || 'Not supplied')}</span>
+                <span><strong>Submitted</strong> ${escapeHtml(formatDateTime(app.submittedAtMs || getTimestampMs(app.submittedAt)))}</span>
+                <span><strong>Source</strong> <a href="${escapeHtml(app.sourcePath || '/')}">${escapeHtml(app.sourceLabel || app.sourcePath || '/')}</a></span>
+              </div>
+              <div class="queue-body">
+                <div class="queue-history">
+                  <h4>Recent Activity</h4>
+                  <ul>${historyHtml || '<li><strong>Created</strong><span>System</span><p>No review activity yet.</p></li>'}</ul>
+                </div>
+                <form method="POST" action="/admin/applications/${encodeURIComponent(app.id)}/status" class="queue-form">
+                  <label>
+                    Reviewer note
+                    <textarea name="note" placeholder="Add context for the next team member, applicant, or audit trail.">${escapeHtml(app.reviewerNote || '')}</textarea>
+                  </label>
+                  <div class="queue-actions">
+                    <button type="submit" name="status" value="approved" class="btn btn-approve">Approve</button>
+                    <button type="submit" name="status" value="in_review" class="btn btn-review">Mark In Review</button>
+                    <button type="submit" name="status" value="needs_info" class="btn btn-request">Request Info</button>
+                    <button type="submit" name="status" value="rejected" class="btn btn-reject">Reject</button>
+                  </div>
+                </form>
+              </div>
+            </article>
+          `;
+        }).join('')
+      : '<div class="empty-state"><h3>No approval items yet</h3><p>New portal registrations and submissions will appear here automatically.</p></div>';
+
+    const userMarkup = latestUsers.length
+      ? latestUsers.map(user => `
+          <tr>
+            <td>${escapeHtml(user.name || user.username || 'Unknown')}</td>
+            <td>${escapeHtml(user.email || 'No email')}</td>
+            <td>${escapeHtml(user.username || 'No username')}</td>
+            <td>${escapeHtml(formatDateTime(user.createdAtMs || getTimestampMs(user.createdAt)))}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="4">No registered users found.</td></tr>';
+
+    const activityMarkup = latestActivity.length
+      ? latestActivity.map(item => `
+          <li>
+            <div>
+              <strong>${escapeHtml(item.action)}</strong>
+              <span>${escapeHtml(item.applicationTitle)}</span>
+            </div>
+            <time>${escapeHtml(formatDateTime(item.atMs))}</time>
+          </li>
+        `).join('')
+      : '<li><div><strong>System ready</strong><span>No approval actions have been taken yet.</span></div><time>Now</time></li>';
+
+    res.send(
+      renderTemplateFile('templates/admin-control-centre.html', {
+        FLASH: flash,
+        CURRENT_USER: escapeHtml(req.user.email || req.user.username),
+        STORAGE_MODE: escapeHtml(isFirebaseConfigured() ? 'Firebase' : 'Demo memory store'),
+        PENDING_COUNT: pendingCount,
+        IN_REVIEW_COUNT: inReviewCount,
+        APPROVED_COUNT: approvedCount,
+        URGENT_COUNT: urgentCount,
+        APPLICATION_MARKUP: applicationMarkup,
+        USER_MARKUP: userMarkup,
+        ACTIVITY_MARKUP: activityMarkup,
+        APPROVAL_STORAGE_TEXT: escapeHtml(isFirebaseConfigured() ? 'Firestore-backed production storage.' : 'Demo in-memory storage for local testing.'),
+        PRIMARY_ADMIN: escapeHtml([...ADMIN_EMAILS][0] || 'Not configured'),
+      })
+    );
+  } catch (error) {
+    res.status(500).send(`Unable to load admin workspace: ${escapeHtml(error.message)}`);
+  }
+});
+
+app.post('/admin/applications/:id/status', isAuthenticated, requireAdmin, async (req, res) => {
+  const id = normalizeValue(req.params.id);
+  const status = normalizeValue(req.body.status);
+  const note = normalizeValue(req.body.note);
+
+  try {
+    await updateApplicationStatus(id, status, req.user, note);
+    res.redirect(buildRedirect('/admin', { success: 'Approval queue updated successfully.' }));
+  } catch (error) {
+    res.redirect(buildRedirect('/admin', { error: error.message || 'Unable to update approval.' }));
+  }
 });
 
 app.get('/logout', (req, res) => {

@@ -83,6 +83,7 @@
         <div id="auth-message" class="auth-message" hidden></div>
 
         <form action="/login" method="POST" id="login-form" novalidate>
+          <input type="hidden" name="returnTo" id="returnTo" value="">
           <input
             type="text"
             name="username"
@@ -130,7 +131,7 @@
           RealMe is designed to protect your privacy and security.
         </p>
 
-        <button type="button" onclick="location.href='/login/signup'">
+        <button type="button" id="create-account-button">
           Create a RealMe Login
         </button>
       </div>
@@ -164,7 +165,24 @@
       var params = new URLSearchParams(window.location.search);
       var error = params.get('error');
       var success = params.get('success');
+      var returnTo = params.get('returnTo');
       var message = document.getElementById('auth-message');
+      var returnToInput = document.getElementById('returnTo');
+      var createButton = document.getElementById('create-account-button');
+
+      if (returnToInput) {
+        returnToInput.value = returnTo || '';
+      }
+
+      if (createButton) {
+        createButton.addEventListener('click', function () {
+          var target = '/login/signup';
+          if (returnTo) {
+            target += '?returnTo=' + encodeURIComponent(returnTo);
+          }
+          window.location.href = target;
+        });
+      }
 
       if (!message) return;
 
@@ -181,7 +199,10 @@
       // Clear the query string so a refresh doesn't keep showing the same message
       if (error || success) {
         if (window.history && window.history.replaceState) {
-          window.history.replaceState({}, document.title, window.location.pathname);
+          var cleanParams = new URLSearchParams();
+          if (returnTo) cleanParams.set('returnTo', returnTo);
+          var nextUrl = window.location.pathname + (cleanParams.toString() ? '?' + cleanParams.toString() : '');
+          window.history.replaceState({}, document.title, nextUrl);
         }
       }
     })();

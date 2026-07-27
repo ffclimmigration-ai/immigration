@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Start Application - Immigration New Zealand</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --orange:#e35205;
+      --orange-dark:#c94900;
+      --orange-soft:#fff1e9;
+      --bg:#f5f4f1;
+      --card:#fff;
+      --text:#17212f;
+      --muted:#66758b;
+      --line:#d7dde7;
+      --shadow:0 14px 34px rgba(16,24,40,.08);
+      --success:#1d6b33;
+      --success-bg:#e2f3e7;
+      --error:#a52a16;
+      --error-bg:#f7dddd;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Inter",Arial,sans-serif;background:linear-gradient(180deg,#fbfaf8 0,#f0eeea 100%);color:var(--text)}
+    a{text-decoration:none}
+    .topbar{background:#000;color:#fff;border-bottom:3px solid var(--orange)}
+    .topbar-inner{
+      max-width:1240px;margin:0 auto;padding:18px 28px;display:flex;justify-content:space-between;align-items:center;gap:16px
+    }
+    .brand{display:flex;align-items:center;gap:14px}
+    .brand-mark{
+      width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--orange),#ff8a4c);display:grid;place-items:center;
+      color:#fff;font-weight:800;letter-spacing:-.03em
+    }
+    .brand-copy strong{display:block;font-size:16px}
+    .brand-copy span{display:block;font-size:11px;color:#c8ced8;margin-top:2px}
+    .nav{display:flex;gap:6px;flex-wrap:wrap}
+    .nav a{
+      color:#f5f7fb;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:600
+    }
+    .nav a.active,.nav a:hover{background:rgba(255,255,255,.08)}
+    .page{max-width:1240px;margin:0 auto;padding:28px}
+    .hero{
+      background:linear-gradient(135deg,#10192b 0,#1d2b44 58%,#ef6b22 160%);
+      color:#fff;border-radius:28px;padding:30px;box-shadow:0 24px 60px rgba(10,15,30,.18);margin-bottom:22px;
+      display:grid;grid-template-columns:minmax(0,1.2fr) minmax(280px,.8fr);gap:20px
+    }
+    .hero h1{margin:0;font-size:34px;letter-spacing:-.04em}
+    .hero p{margin:12px 0 0;color:#dbe5f4;line-height:1.7;max-width:760px}
+    .hero-card{
+      background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:22px;padding:20px
+    }
+    .hero-card small{display:block;text-transform:uppercase;letter-spacing:.08em;color:#ffcfb6;font-weight:700;margin-bottom:10px}
+    .hero-card strong{display:block;font-size:18px;margin-bottom:8px}
+    .hero-card span{display:block;font-size:13px;color:#dbe5f4;line-height:1.6}
+    .flash{padding:14px 16px;border-radius:14px;font-size:14px;font-weight:500;margin-bottom:18px}
+    .flash-success{background:var(--success-bg);color:var(--success)}
+    .flash-error{background:var(--error-bg);color:var(--error)}
+    .layout{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(320px,.8fr);gap:22px;align-items:start}
+    .card{
+      background:var(--card);border:1px solid var(--line);border-radius:24px;padding:24px;box-shadow:var(--shadow)
+    }
+    .card h2{margin:0 0 8px;font-size:22px;letter-spacing:-.02em}
+    .card p.lead{margin:0 0 18px;color:var(--muted);line-height:1.65}
+    .meta-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+    .meta-item{padding:14px;border-radius:16px;background:#f7f8fb;border:1px solid #eaedf3}
+    .meta-item small{display:block;text-transform:uppercase;letter-spacing:.08em;color:#7c889a;font-weight:700;margin-bottom:6px}
+    .meta-item strong{display:block;font-size:15px}
+    .form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+    .field{display:grid;gap:8px}
+    .field.full{grid-column:1/-1}
+    label{font-size:13px;font-weight:700;color:#2b3648}
+    input,select,textarea{
+      width:100%;border:1px solid #ccd4e0;border-radius:16px;background:#fff;padding:14px 15px;
+      font:inherit;color:var(--text)
+    }
+    textarea{min-height:132px;resize:vertical;line-height:1.6}
+    input:focus,select:focus,textarea:focus{
+      outline:none;border-color:rgba(227,82,5,.6);box-shadow:0 0 0 3px rgba(227,82,5,.12)
+    }
+    .hint{font-size:12px;color:var(--muted);line-height:1.5}
+    .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}
+    .btn{
+      border:none;border-radius:16px;padding:14px 18px;font:inherit;font-weight:700;cursor:pointer
+    }
+    .btn-primary{background:linear-gradient(135deg,var(--orange),#ff8a4c);color:#fff}
+    .btn-primary:hover{background:linear-gradient(135deg,var(--orange-dark),#ff7a31)}
+    .btn-secondary{background:#f3f5f8;color:#2f3a4d}
+    .panel-list{display:grid;gap:12px}
+    .panel-list article{padding:16px;border-radius:18px;background:#fafbfd;border:1px solid #eaedf3}
+    .panel-list small{display:block;text-transform:uppercase;letter-spacing:.08em;font-weight:700;color:#7c889a;margin-bottom:6px}
+    .panel-list strong{display:block;font-size:15px;margin-bottom:6px}
+    .panel-list p{margin:0;color:var(--muted);font-size:13px;line-height:1.6}
+    .recent-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+    .recent-list li{padding:14px 16px;border-radius:16px;background:#fafbfd;border:1px solid #eaedf3}
+    .recent-list strong{display:block;font-size:14px}
+    .recent-list span{display:block;font-size:12px;color:var(--muted);margin-top:4px}
+    .recent-list p{margin:8px 0 0;font-size:13px;color:#465163;line-height:1.55}
+    @media (max-width:1080px){
+      .hero,.layout{grid-template-columns:1fr}
+    }
+    @media (max-width:700px){
+      .page{padding:16px}
+      .topbar-inner{padding:16px}
+      .nav{display:none}
+      .hero{padding:22px}
+      .hero h1{font-size:28px}
+      .form-grid,.meta-grid{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <div class="brand-mark">INZ</div>
+        <div class="brand-copy">
+          <strong>Immigration New Zealand</strong>
+          <span>Application intake and approvals</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="/">Home</a>
+        <a href="/visas">Visas</a>
+        <a href="/apply" class="active">Apply</a>
+        <a href="/dashboard">Dashboard</a>
+        <a href="/admin">Admin</a>
+        <a href="/logout">Logout</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="hero">
+      <div>
+        <h1>Start an application</h1>
+        <p>Use this shared intake form to capture application requests from the live website and send them straight into the approval queue. Every submission becomes trackable in the admin workspace.</p>
+      </div>
+      <div class="hero-card">
+        <small>Applicant</small>
+        <strong>{{APPLICANT_NAME}}</strong>
+        <span>{{APPLICANT_EMAIL}}</span>
+        <span style="margin-top:8px">Username: {{APPLICANT_USERNAME}}</span>
+      </div>
+    </section>
+
+    {{FLASH}}
+
+    <section class="layout">
+      <div class="card">
+        <h2>Application details</h2>
+        <p class="lead">Tell us what you are applying for, where you started from, and any supporting context the admin team should review.</p>
+
+        <div class="meta-grid" style="margin-bottom:18px">
+          <div class="meta-item">
+            <small>Source page</small>
+            <strong>{{SOURCE_LABEL}}</strong>
+          </div>
+          <div class="meta-item">
+            <small>Website path</small>
+            <strong>{{SOURCE_PATH}}</strong>
+          </div>
+        </div>
+
+        <form action="/apply" method="POST">
+          <input type="hidden" name="sourcePath" value="{{SOURCE_PATH}}">
+
+          <div class="form-grid">
+            <div class="field">
+              <label for="applicationTitle">Application title</label>
+              <input id="applicationTitle" name="applicationTitle" value="{{DEFAULT_APPLICATION_TITLE}}" required>
+            </div>
+
+            <div class="field">
+              <label for="visaType">Application type</label>
+              <select id="visaType" name="visaType">
+                {{VISA_TYPE_OPTIONS}}
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="priority">Priority</label>
+              <select id="priority" name="priority">
+                {{PRIORITY_OPTIONS}}
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="requestedStartDate">Requested start date</label>
+              <input id="requestedStartDate" name="requestedStartDate" type="date" value="{{REQUESTED_START_DATE}}">
+            </div>
+
+            <div class="field full">
+              <label for="summary">Application summary</label>
+              <textarea id="summary" name="summary" required>{{DEFAULT_SUMMARY}}</textarea>
+              <div class="hint">Explain the application, who it is for, and what the reviewer should understand first.</div>
+            </div>
+
+            <div class="field full">
+              <label for="documentChecklist">Supporting documents and evidence</label>
+              <textarea id="documentChecklist" name="documentChecklist" placeholder="Example: passport bio page, employment agreement, medical certificate, police certificate">{{DEFAULT_DOCUMENTS}}</textarea>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="btn btn-primary" type="submit">Submit to approval queue</button>
+            <a class="btn btn-secondary" href="{{SOURCE_PATH}}">Back to source page</a>
+          </div>
+        </form>
+      </div>
+
+      <div style="display:grid;gap:22px">
+        <section class="card">
+          <h2>How this works</h2>
+          <div class="panel-list">
+            <article>
+              <small>Step 1</small>
+              <strong>Submit from the live site</strong>
+              <p>The application is stored with your account details and the original page that started the process.</p>
+            </article>
+            <article>
+              <small>Step 2</small>
+              <strong>Admin queue review</strong>
+              <p>The admin team can approve, reject, request more information, or move the case into manual review.</p>
+            </article>
+            <article>
+              <small>Step 3</small>
+              <strong>Trackable audit trail</strong>
+              <p>Each decision is appended to the activity history so the team can see exactly what changed and when.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Your recent submissions</h2>
+          <ul class="recent-list">
+            {{RECENT_APPLICATIONS}}
+          </ul>
+        </section>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
