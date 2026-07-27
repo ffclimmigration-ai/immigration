@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Set up your account</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --orange:#e35205;
+      --orange-dark:#cf4900;
+      --bg:#f3f3f3;
+      --text:#1f1f1f;
+      --muted:#6f6f6f;
+      --border:#c9c9c9;
+      --line:#d5d5d5;
+      --disabled:#a9a9a9;
+      --cancel-bg:#f1dfd7;
+      --cancel-text:#c24a16;
+    }
+
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:"Inter",Arial,sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+
+    /* Header */
+    .topbar{
+      background:#000;
+      height:60px;
+      display:flex;
+      align-items:center;
+    }
+    .topbar-inner{
+      width:100%;
+      max-width:1200px;
+      margin:0 auto;
+      padding:0 24px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+    }
+
+    .realme-logo{
+      display:flex;
+      align-items:center;
+      gap:12px;
+      color:#fff;
+    }
+    .realme-mark{
+      width:30px;
+      height:30px;
+      border-radius:50%;
+      background:#fff;
+      position:relative;
+      flex-shrink:0;
+    }
+    .realme-mark::before{
+      content:"";
+      position:absolute;
+      width:8px;
+      height:8px;
+      border-radius:50%;
+      background:#000;
+      left:7px;
+      top:7px;
+    }
+    .realme-mark::after{
+      content:"";
+      position:absolute;
+      width:8px;
+      height:14px;
+      border-radius:4px;
+      background:#000;
+      right:7px;
+      top:8px;
+    }
+    .realme-text{
+      line-height:1;
+    }
+    .realme-text .brand{
+      font-size:18px;
+      font-weight:700;
+      letter-spacing:-0.02em;
+    }
+    .realme-text .sub{
+      font-size:10px;
+      color:#d8d8d8;
+      margin-top:3px;
+    }
+
+    .nz-logo{
+      color:#fff;
+      text-align:right;
+      line-height:1.05;
+      font-size:11px;
+      font-weight:700;
+      letter-spacing:0.02em;
+    }
+    .nz-logo .top{
+      font-size:13px;
+    }
+
+    /* Back bar */
+    .backbar{
+      background:#e9e9e9;
+      border-bottom:1px solid #d8d8d8;
+    }
+    .backbar-inner{
+      max-width:1200px;
+      margin:0 auto;
+      padding:12px 24px;
+    }
+    .backlink{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      color:#3f3f3f;
+      text-decoration:none;
+      font-size:12px;
+      font-weight:500;
+    }
+    .back-icon{
+      width:16px;
+      height:16px;
+      border:1px solid #666;
+      border-radius:50%;
+      display:grid;
+      place-items:center;
+      font-size:10px;
+      line-height:1;
+    }
+
+    /* Main */
+    .page{
+      max-width:1200px;
+      margin:0 auto;
+      padding:28px 24px 48px;
+    }
+    .form-wrap{
+      width:100%;
+      max-width:680px;
+    }
+
+    h1{
+      margin:0 0 10px;
+      font-size:26px;
+      font-weight:300;
+      color:var(--orange);
+    }
+
+    .rule{
+      border:none;
+      border-top:1px solid var(--line);
+      margin:0 0 16px;
+    }
+
+    .intro{
+      font-size:11px;
+      line-height:1.45;
+      color:#333;
+      margin-bottom:22px;
+    }
+    .intro ul{
+      margin:6px 0 0 16px;
+      padding:0;
+    }
+    .intro li{
+      margin:2px 0;
+    }
+
+    .field{
+      margin-bottom:10px;
+    }
+    .input{
+      width:100%;
+      height:34px;
+      border:1px solid var(--border);
+      border-radius:8px;
+      padding:0 12px;
+      font-size:12px;
+      background:#fff;
+    }
+    .input:focus{
+      outline:none;
+      border-color:#8a8a8a;
+      box-shadow:0 0 0 2px rgba(227,82,5,.08);
+    }
+
+    .error{
+      font-size:10px;
+      color:#d12f1b;
+      margin-top:4px;
+    }
+
+    .auth-message{
+      margin:0 0 16px;
+      padding:12px 14px;
+      border-radius:8px;
+      font-size:12px;
+      line-height:1.45;
+    }
+
+    .auth-message.error{
+      background:#f7dddd;
+      color:#a52a16;
+    }
+
+    .auth-message.success{
+      background:#e2f3e7;
+      color:#1d6b33;
+    }
+
+    .btn{
+      height:28px;
+      border:none;
+      border-radius:8px;
+      padding:0 14px;
+      font-size:11px;
+      font-weight:600;
+      cursor:pointer;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+    }
+    .btn-primary{
+      background:var(--orange);
+      color:#fff;
+    }
+    .btn-primary:hover{
+      background:var(--orange-dark);
+    }
+
+    .btn-icon{
+      width:14px;
+      height:14px;
+      border-radius:50%;
+      background:#fff;
+      color:var(--orange);
+      display:grid;
+      place-items:center;
+      font-size:9px;
+      font-weight:700;
+      line-height:1;
+    }
+
+    .section-rule{
+      border:none;
+      border-top:1px solid var(--line);
+      margin:16px 0 14px;
+    }
+
+    .section-title{
+      font-size:16px;
+      font-weight:700;
+      margin:0 0 10px;
+    }
+
+    .password-text{
+      font-size:11px;
+      line-height:1.45;
+      color:#333;
+      margin-bottom:12px;
+    }
+
+    .password-grid{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:8px 24px;
+      margin-top:8px;
+    }
+
+    .password-grid ul{
+      margin:0;
+      padding-left:16px;
+    }
+
+    .password-grid li{
+      font-size:11px;
+      margin:3px 0;
+    }
+
+    .actions{
+      display:flex;
+      gap:10px;
+      margin-top:18px;
+      flex-wrap:wrap;
+    }
+
+    .btn-continue{
+      background:var(--disabled);
+      color:#fff;
+      min-width:120px;
+      cursor:not-allowed;
+    }
+
+    .btn-continue.is-ready{
+      background:var(--orange);
+      cursor:pointer;
+    }
+
+    .btn-continue.is-ready:hover{
+      background:var(--orange-dark);
+    }
+
+    .btn-cancel{
+      background:var(--cancel-bg);
+      color:var(--cancel-text);
+      min-width:120px;
+    }
+
+    .btn-cancel .btn-icon{
+      background:#fff;
+      color:var(--cancel-text);
+    }
+
+    /* Responsive */
+    @media (max-width:768px){
+      .topbar{height:72px}
+      .topbar-inner{
+        padding:0 16px;
+      }
+      .page{
+        padding:22px 16px 40px;
+      }
+      .form-wrap{
+        max-width:none;
+      }
+      h1{
+        font-size:30px;
+      }
+      .password-grid{
+        grid-template-columns:1fr;
+      }
+      .actions{
+        flex-direction:column;
+      }
+      .btn{
+        width:100%;
+        justify-content:center;
+        height:40px;
+        font-size:13px;
+      }
+    }
+
+    @media (max-width:480px){
+      .realme-text .brand{font-size:16px}
+      .nz-logo{font-size:10px}
+      .nz-logo .top{font-size:12px}
+      h1{font-size:26px}
+      .input{height:40px;font-size:13px}
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="realme-logo">
+        <div class="realme-mark"></div>
+        <div class="realme-text">
+          <div class="brand">RealMe</div>
+          <div class="sub">Tēnei Au</div>
+        </div>
+      </div>
+
+      <div class="nz-logo">
+        <div class="top">NEW ZEALAND</div>
+        <div>IMMIGRATION</div>
+      </div>
+    </div>
+  </header>
+
+  <div class="backbar">
+    <div class="backbar-inner">
+      <a href="/login" class="backlink">
+        <span class="back-icon">←</span>
+        Go back to Immigration New Zealand
+      </a>
+    </div>
+  </div>
+
+  <main class="page">
+    <div class="form-wrap">
+      <h1>Set up your account</h1>
+      <hr class="rule">
+
+      <div class="intro">
+        To set up an account you will need to confirm your email address:
+        <ul>
+          <li>Enter your email address and click the Send Code button</li>
+          <li>Check your email to retrieve the Code</li>
+          <li>Enter the code in the Confirmation Code field</li>
+          <li>Click the Confirm Code button</li>
+        </ul>
+      </div>
+
+      <div id="auth-message" class="auth-message" hidden></div>
+
+      <form id="signup-form" action="/register" method="POST">
+      <div class="field">
+        <input class="input" type="email" name="email" placeholder="Email Address *" autocomplete="email" required>
+        <div class="error">Email Address is required.</div>
+      </div>
+
+      <button class="btn btn-primary" type="button">
+        <span class="btn-icon">→</span>
+        Send Code
+      </button>
+
+      <div class="field" style="margin-top:14px">
+        <input class="input" type="text" name="username" placeholder="Username *" autocomplete="username" minlength="4" required>
+        <div style="font-size:10px;color:#666;margin-top:4px">Minimum 4 characters.</div>
+      </div>
+
+      <hr class="section-rule">
+
+      <h2 class="section-title">Password</h2>
+
+      <div class="password-text">
+        Your password must be between 8 and 64 characters long. It must contain at least three (3) of the below:
+      </div>
+
+      <div class="password-grid">
+        <ul>
+          <li>uppercase (A–Z)</li>
+          <li>lowercase (a–z)</li>
+        </ul>
+        <ul>
+          <li>numbers (0–9)</li>
+          <li>symbols (@ # $ % ^ &amp; * - _ ! + = [ ] { } | \ : ; ? / ~ ` ( ) &lt; &gt;)</li>
+        </ul>
+      </div>
+
+      <div class="field" style="margin-top:16px">
+        <input class="input" type="password" name="password" placeholder="Password *" autocomplete="new-password" minlength="8" required>
+      </div>
+
+      <div class="field">
+        <input class="input" type="password" name="confirmPassword" placeholder="Password (again) *" autocomplete="new-password" minlength="8" required>
+      </div>
+
+      <div class="actions">
+        <button id="continue-button" class="btn btn-continue" type="submit" disabled>
+          <span class="btn-icon">✓</span>
+          Continue
+        </button>
+
+        <button class="btn btn-cancel" type="button" onclick="location.href='/login'">
+          <span class="btn-icon">×</span>
+          Cancel
+        </button>
+      </div>
+      </form>
+    </div>
+  </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var error = params.get('error');
+      var success = params.get('success');
+      var message = document.getElementById('auth-message');
+      var form = document.getElementById('signup-form');
+      var continueButton = document.getElementById('continue-button');
+
+      if (message) {
+        if (error) {
+          message.hidden = false;
+          message.className = 'auth-message error';
+          message.textContent = error;
+        } else if (success) {
+          message.hidden = false;
+          message.className = 'auth-message success';
+          message.textContent = success;
+        }
+      }
+
+      if (!form || !continueButton) {
+        return;
+      }
+
+      function updateButtonState() {
+        var email = form.elements.email.value.trim();
+        var username = form.elements.username.value.trim();
+        var password = form.elements.password.value;
+        var confirmPassword = form.elements.confirmPassword.value;
+        var ready =
+          email.length > 0 &&
+          username.length >= 4 &&
+          password.length >= 8 &&
+          confirmPassword.length >= 8 &&
+          password === confirmPassword;
+
+        continueButton.disabled = !ready;
+        continueButton.classList.toggle('is-ready', ready);
+      }
+
+      form.addEventListener('input', updateButtonState);
+      updateButtonState();
+    })();
+  </script>
+</body>
+</html>

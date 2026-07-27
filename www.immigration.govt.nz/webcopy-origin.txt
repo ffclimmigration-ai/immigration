@@ -1,0 +1,80 @@
+Uri: https://www.immigration.govt.nz/assets/inz/documents/forms-and-guides/inz1027.pdf
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\assets\inz\documents\forms-and-guides\inz1027.pdf
+Content Type: application/pdf
+
+Uri: https://www.immigration.govt.nz/assets/inz/documents/forms-and-guides/inz1220.pdf
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\assets\inz\documents\forms-and-guides\inz1220.pdf
+Content Type: application/pdf
+
+Uri: https://www.immigration.govt.nz/live/where-to-apply-for-new-zealand-citizenship-and-a-passport/
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\live\where-to-apply-for-new-zealand-citizenship-and-a-passport\index.htm
+Content Type: text/html
+
+Uri: https://www.immigration.govt.nz/visas/accredited-employer-work-visa/
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\visas\accredited-employer-work-visa\index.htm
+Content Type: text/html
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/app.css?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\app.css
+Content Type: text/css
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/app.js?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\app.js
+Content Type: application/javascript
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/icons/favicon/apple-touch-icon.png?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\icons\favicon\apple-touch-icon.png
+Content Type: image/png
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/icons/favicon/favicon-16x16.png?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\icons\favicon\favicon-16x16.png
+Content Type: image/png
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/icons/favicon/favicon-32x32.png?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\icons\favicon\favicon-32x32.png
+Content Type: image/png
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/icons/favicon/site.webmanifest?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\icons\favicon\site.webmanifest
+Content Type: application/manifest+json
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/manifest.js?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\manifest.js
+Content Type: application/javascript
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/patterns/waharoa.svg?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\patterns\waharoa.svg
+Content Type: image/svg+xml
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/print.css?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\print.css
+Content Type: text/css
+
+Uri: https://www.immigration.govt.nz/_resources/themes/app/dist/vendor.js?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\themes\app\dist\vendor.js
+Content Type: application/javascript
+
+Uri: https://www.immigration.govt.nz/_resources/vendor/andrewandante/womens-refuge-shield/css/button.css?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\vendor\andrewandante\womens-refuge-shield\css\button.css
+Content Type: text/css
+
+Uri: https://www.immigration.govt.nz/_resources/vendor/andrewandante/womens-refuge-shield/img/logos/custom-logo.png?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\vendor\andrewandante\womens-refuge-shield\img\logos\custom-logo.png
+Content Type: image/png
+
+Uri: https://www.immigration.govt.nz/_resources/vendor/andrewandante/womens-refuge-shield/javascript/button.js?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\vendor\andrewandante\womens-refuge-shield\javascript\button.js
+Content Type: application/javascript
+
+Uri: https://www.immigration.govt.nz/_resources/vendor/andrewandante/womens-refuge-shield/javascript/embed.js?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\vendor\andrewandante\womens-refuge-shield\javascript\embed.js
+Content Type: application/javascript
+
+Uri: https://www.immigration.govt.nz/_resources/vendor/nzta/silverstripe-sitebanner/client/css/site-banner.css?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\vendor\nzta\silverstripe-sitebanner\client\css\site-banner.css
+Content Type: text/css
+
+Uri: https://www.immigration.govt.nz/_resources/vendor/nzta/silverstripe-sitebanner/client/javascript/site-banner.js?m=1783974300
+File Name: C:\Downloaded Web Sites\www.immigration.govt.nz\www.immigration.govt.nz\_resources\vendor\nzta\silverstripe-sitebanner\client\javascript\site-banner.js
+Content Type: application/javascript
+
