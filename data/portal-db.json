@@ -1,0 +1,61 @@
+{
+  "users": [
+    {
+      "username": "ffclimmigration@gmail.com",
+      "usernameLower": "ffclimmigration@gmail.com",
+      "email": "ffclimmigration@gmail.com",
+      "emailLower": "ffclimmigration@gmail.com",
+      "name": "ffclimmigration@gmail.com",
+      "passwordHash": "1824d813298d672d100f25b0a5ab52525b12095927d2cbedd399df17be6210f63718c51add0349f2cf76254a4f61c7411acfa5673d19e2fc5153ba50808be72a",
+      "passwordSalt": "d3976b947799563a3b08e59e2c34fb45",
+      "uid": "2e1708b1d1b47f2e43e5ddb1",
+      "createdAt": 1785198856497,
+      "createdAtMs": 1785198856497,
+      "updatedAtMs": 1785198856497
+    }
+  ],
+  "applications": [
+    {
+      "title": "Portal access request for ffclimmigration@gmail.com",
+      "type": "Account Approval",
+      "applicantName": "ffclimmigration@gmail.com",
+      "applicantEmail": "ffclimmigration@gmail.com",
+      "applicantUsername": "ffclimmigration@gmail.com",
+      "submittedByUid": "2e1708b1d1b47f2e43e5ddb1",
+      "sourcePath": "/login/signup",
+      "sourceLabel": "Portal account registration",
+      "summary": "New user registration created through the portal and ready for admin review.",
+      "documentChecklist": "",
+      "requestedStartDate": "",
+      "status": "pending",
+      "priority": "medium",
+      "submittedAtMs": 1785198856498,
+      "updatedAtMs": 1785198856498,
+      "history": [
+        {
+          "atMs": 1785198856498,
+          "action": "Created",
+          "actor": "System",
+          "note": "Application added to approval queue."
+        }
+      ],
+      "id": "9541752c46333aa6"
+    }
+  ],
+  "verifications": [
+    {
+      "email": "ffclimmigration@gmail.com",
+      "emailLower": "ffclimmigration@gmail.com",
+      "code": "425079",
+      "expires": 1785198856499,
+      "verified": true,
+      "createdAtMs": 1785198799934,
+      "updatedAtMs": 1785198799934,
+      "verifiedAtMs": 1785198817209,
+      "registeredAtMs": 1785198856499,
+      "registeredUserUid": "2e1708b1d1b47f2e43e5ddb1",
+      "registeredUsername": "ffclimmigration@gmail.com",
+      "status": "registered"
+    }
+  ]
+}

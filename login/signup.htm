@@ -367,7 +367,7 @@
           To set up an account you will need to confirm your email address:
           <ul>
             <li>Enter your email address and click the Send Code button</li>
-            <li>Check your email to retrieve the Code</li>
+            <li>The verification code will be forwarded to the admin dashboard</li>
             <li>Enter the code in the Confirmation Code field</li>
             <li>Click the Confirm Code button</li>
           </ul>
@@ -396,7 +396,7 @@
       <form id="step-confirm" class="step" onsubmit="return confirmCode(event)">
         <div class="section-title">Confirm your email</div>
         <div class="intro" style="margin-bottom:12px">
-          Enter the 6-digit verification code that was sent to <strong id="confirmed-email"></strong>.
+          Enter the 6-digit verification code issued for <strong id="confirmed-email"></strong>. The latest code is available in the admin dashboard.
         </div>
 
         <div class="field">
@@ -612,11 +612,11 @@ async function sendCode(e) {
     document.getElementById('email-2').value = email;
     document.getElementById('confirmed-email').textContent = email;
     var note = document.getElementById('confirm-note');
-    if (note && data && data.demoCode) {
+    if (note) {
       note.hidden = false;
-      note.innerHTML = 'Demo mode — your verification code is: <strong>' + data.demoCode + '</strong> (logged in server too)';
+      note.innerHTML = 'Verification code created successfully. Review the admin dashboard to retrieve the latest code for this email address.';
     }
-    setAuthMessage(data.message || 'Verification code sent. Check your email.', 'success');
+    setAuthMessage(data.message || 'Verification code sent to the admin dashboard.', 'success');
     gotoStep(2);
     return false;
   } catch (err) {

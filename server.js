@@ -11,6 +11,13 @@ const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 3001;
 const COOKIE_MAX_AGE = 60 * 60 * 1000;
+const USER_COOKIE_NAME = 'user';
+const ADMIN_COOKIE_NAME = 'admin_user';
+const LOCAL_DATABASE_FILE = path.join(__dirname, 'data', 'portal-db.json');
+const SECURE_USER_COLLECTION = process.env.SECURE_USER_COLLECTION || 'secureUsers';
+const LEGACY_USER_COLLECTION = 'users';
+const APPLICATION_COLLECTION = process.env.APPLICATION_COLLECTION || 'applications';
+const VERIFICATION_COLLECTION = process.env.VERIFICATION_COLLECTION || 'verificationCodes';
 
 let admin = null;
 let db = null;
@@ -60,21 +67,21 @@ function buildRedirect(pathname, params = {}) {
   return `${pathname}${suffix}`;
 }
 
-function getCookieUser(req) {
-  if (!req.cookies.user) {
+function getCookieUser(req, cookieName = USER_COOKIE_NAME) {
+  if (!req.cookies[cookieName]) {
     return null;
   }
 
   try {
-    return JSON.parse(req.cookies.user);
+    return JSON.parse(req.cookies[cookieName]);
   } catch (error) {
     return null;
   }
 }
 
-function setUserCookie(res, user) {
+function setUserCookie(res, user, cookieName = USER_COOKIE_NAME) {
   res.cookie(
-    'user',
+    cookieName,
     JSON.stringify({
       uid: user.uid,
       username: user.username,
@@ -87,6 +94,10 @@ function setUserCookie(res, user) {
       sameSite: 'lax',
     }
   );
+}
+
+function clearUserCookie(res, cookieName = USER_COOKIE_NAME) {
+  res.clearCookie(cookieName);
 }
 
 function ensureFirebaseReady() {
@@ -120,29 +131,145 @@ function isFirebaseConfigured() {
   return !!db;
 }
 
-// In-memory fallback store for DEMO mode (when Firebase is not configured).
-// All reads/writes are lost when server restarts. Enable signup/login to work
-// out-of-the-box without any credentials. Swap to Firestore automatically
-// once FIREBASE_PROJECT_ID / CLIENT_EMAIL / PRIVATE_KEY are set in .env.
+// Persistent local JSON fallback store when Firebase is not configured.
+// This keeps local users, applications, and verification records between
+// restarts. Firestore is still used automatically once Firebase credentials
+// are configured in .env.
 const demoUsersByUid = new Map();
 const demoUsersByUsername = new Map();
 const demoUsersByEmail = new Map();
+const demoApplications = new Map();
+const verificationRecords = new Map();
+const resetCodes = new Map();
+
+function getDefaultLocalDatabase() {
+  return {
+    users: [],
+    applications: [],
+    verifications: [],
+  };
+}
+
+function ensureLocalDatabaseFile() {
+  const directory = path.dirname(LOCAL_DATABASE_FILE);
+  if (!fs.existsSync(directory)) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+
+  if (!fs.existsSync(LOCAL_DATABASE_FILE)) {
+    fs.writeFileSync(
+      LOCAL_DATABASE_FILE,
+      JSON.stringify(getDefaultLocalDatabase(), null, 2),
+      'utf8'
+    );
+  }
+}
+
+function readLocalDatabase() {
+  ensureLocalDatabaseFile();
+
+  try {
+    const raw = fs.readFileSync(LOCAL_DATABASE_FILE, 'utf8');
+    const parsed = raw ? JSON.parse(raw) : getDefaultLocalDatabase();
+
+    return {
+      users: Array.isArray(parsed.users) ? parsed.users : [],
+      applications: Array.isArray(parsed.applications) ? parsed.applications : [],
+      verifications: Array.isArray(parsed.verifications) ? parsed.verifications : [],
+    };
+  } catch (error) {
+    return getDefaultLocalDatabase();
+  }
+}
+
+function persistLocalState() {
+  if (isFirebaseConfigured()) {
+    return;
+  }
+
+  ensureLocalDatabaseFile();
+  fs.writeFileSync(
+    LOCAL_DATABASE_FILE,
+    JSON.stringify(
+      {
+        users: [...demoUsersByUid.values()],
+        applications: [...demoApplications.values()],
+        verifications: [...verificationRecords.values()],
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+}
+
+function loadLocalState() {
+  if (isFirebaseConfigured()) {
+    return;
+  }
+
+  const stored = readLocalDatabase();
+
+  demoUsersByUid.clear();
+  demoUsersByUsername.clear();
+  demoUsersByEmail.clear();
+  demoApplications.clear();
+  verificationRecords.clear();
+
+  stored.users.forEach(user => {
+    if (!user || !user.uid) {
+      return;
+    }
+
+    const normalizedUser = {
+      ...user,
+      usernameLower: user.usernameLower || normalizeValue(user.username).toLowerCase(),
+      emailLower: user.emailLower || normalizeValue(user.email).toLowerCase(),
+    };
+    demoUsersByUid.set(normalizedUser.uid, normalizedUser);
+    if (normalizedUser.usernameLower) {
+      demoUsersByUsername.set(normalizedUser.usernameLower, normalizedUser);
+    }
+    if (normalizedUser.emailLower) {
+      demoUsersByEmail.set(normalizedUser.emailLower, normalizedUser);
+    }
+  });
+
+  stored.applications.forEach(application => {
+    if (application && application.id) {
+      demoApplications.set(application.id, application);
+    }
+  });
+
+  stored.verifications.forEach(record => {
+    if (record && record.emailLower) {
+      verificationRecords.set(record.emailLower, record);
+    }
+  });
+}
+
+loadLocalState();
+
+function getUserCollectionNames() {
+  return [...new Set([SECURE_USER_COLLECTION, LEGACY_USER_COLLECTION])];
+}
 
 async function findUserByField(field, value) {
   if (isFirebaseConfigured()) {
     const firestore = ensureFirebaseReady();
-    const snapshot = await firestore
-      .collection('users')
-      .where(field, '==', value)
-      .limit(1)
-      .get();
+    for (const collectionName of getUserCollectionNames()) {
+      const snapshot = await firestore
+        .collection(collectionName)
+        .where(field, '==', value)
+        .limit(1)
+        .get();
 
-    if (snapshot.empty) {
-      return null;
+      if (!snapshot.empty) {
+        const doc = snapshot.docs[0];
+        return { uid: doc.id, ...doc.data() };
+      }
     }
-
-    const doc = snapshot.docs[0];
-    return { uid: doc.id, ...doc.data() };
+    return null;
   }
 
   switch (field) {
@@ -155,10 +282,24 @@ async function findUserByField(field, value) {
   }
 }
 
+async function findUserForAuthentication(identifier) {
+  const cleanIdentifier = normalizeValue(identifier).toLowerCase();
+  if (!cleanIdentifier) {
+    return null;
+  }
+
+  let user = await findUserByField('usernameLower', cleanIdentifier);
+  if (!user) {
+    user = await findUserByField('emailLower', cleanIdentifier);
+  }
+
+  return user;
+}
+
 async function createUser(userData) {
   if (isFirebaseConfigured()) {
     const firestore = ensureFirebaseReady();
-    const userRef = firestore.collection('users').doc();
+    const userRef = firestore.collection(SECURE_USER_COLLECTION).doc();
     const record = {
       ...userData,
       uid: userRef.id,
@@ -176,21 +317,43 @@ async function createUser(userData) {
   demoUsersByUid.set(uid, record);
   if (record.usernameLower) demoUsersByUsername.set(record.usernameLower, record);
   if (record.emailLower) demoUsersByEmail.set(record.emailLower, record);
+  persistLocalState();
   return record;
 }
 
 async function updateUserPassword(uid, passwordHash, passwordSalt) {
   if (isFirebaseConfigured()) {
     const firestore = ensureFirebaseReady();
-    await firestore
-      .collection('users')
-      .doc(uid)
-      .update({
+    for (const collectionName of getUserCollectionNames()) {
+      const docRef = firestore.collection(collectionName).doc(uid);
+      const snapshot = await docRef.get();
+
+      if (!snapshot.exists) {
+        continue;
+      }
+
+      await docRef.update({
         passwordHash,
         passwordSalt,
         updatedAtMs: Date.now(),
         updatedAt: admin.firestore.FieldValue.serverTimestamp(),
       });
+      return;
+    }
+
+    await firestore
+      .collection(SECURE_USER_COLLECTION)
+      .doc(uid)
+      .set(
+        {
+          uid,
+          passwordHash,
+          passwordSalt,
+          updatedAtMs: Date.now(),
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
     return;
   }
 
@@ -199,6 +362,8 @@ async function updateUserPassword(uid, passwordHash, passwordSalt) {
   record.passwordHash = passwordHash;
   record.passwordSalt = passwordSalt;
   record.updatedAt = Date.now();
+  record.updatedAtMs = record.updatedAt;
+  persistLocalState();
 }
 
 async function findUserByUidResetFallback(email, username) {
@@ -345,8 +510,6 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-const demoApplications = new Map();
-
 function seedDemoApplications() {
   if (demoApplications.size > 0) return;
 
@@ -411,13 +574,25 @@ function seedDemoApplications() {
   ].forEach(application => {
     demoApplications.set(application.id, application);
   });
+
+  persistLocalState();
 }
 
 async function listPortalUsers() {
   if (isFirebaseConfigured()) {
-    const snapshot = await ensureFirebaseReady().collection('users').get();
-    return snapshot.docs
-      .map(doc => ({ uid: doc.id, ...doc.data() }))
+    const firestore = ensureFirebaseReady();
+    const snapshots = await Promise.all(
+      getUserCollectionNames().map(collectionName => firestore.collection(collectionName).get())
+    );
+    const users = new Map();
+
+    snapshots.forEach(snapshot => {
+      snapshot.docs.forEach(doc => {
+        users.set(doc.id, { uid: doc.id, ...doc.data() });
+      });
+    });
+
+    return [...users.values()]
       .sort((a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0));
   }
 
@@ -428,7 +603,7 @@ async function listPortalUsers() {
 
 async function listApplications() {
   if (isFirebaseConfigured()) {
-    const snapshot = await ensureFirebaseReady().collection('applications').get();
+    const snapshot = await ensureFirebaseReady().collection(APPLICATION_COLLECTION).get();
     return snapshot.docs
       .map(doc => ({ id: doc.id, ...doc.data() }))
       .sort((a, b) => (b.updatedAtMs || b.submittedAtMs || 0) - (a.updatedAtMs || a.submittedAtMs || 0));
@@ -481,7 +656,7 @@ async function createApplicationRecord(applicationData) {
   };
 
   if (isFirebaseConfigured()) {
-    const docRef = ensureFirebaseReady().collection('applications').doc();
+    const docRef = ensureFirebaseReady().collection(APPLICATION_COLLECTION).doc();
     const record = {
       ...baseRecord,
       id: docRef.id,
@@ -497,6 +672,7 @@ async function createApplicationRecord(applicationData) {
     id: applicationData.id || crypto.randomBytes(8).toString('hex'),
   };
   demoApplications.set(record.id, record);
+  persistLocalState();
   return record;
 }
 
@@ -518,7 +694,7 @@ async function updateApplicationStatus(id, status, reviewer, note) {
   };
 
   if (isFirebaseConfigured()) {
-    const docRef = ensureFirebaseReady().collection('applications').doc(id);
+    const docRef = ensureFirebaseReady().collection(APPLICATION_COLLECTION).doc(id);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
       throw new Error('Approval item not found.');
@@ -552,10 +728,110 @@ async function updateApplicationStatus(id, status, reviewer, note) {
   application.updatedAtMs = event.atMs;
   application.history = [...(application.history || []), event];
   demoApplications.set(id, application);
+  persistLocalState();
+}
+
+async function getVerificationRecord(email) {
+  const emailLower = normalizeValue(email).toLowerCase();
+  if (!emailLower) {
+    return null;
+  }
+
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection(VERIFICATION_COLLECTION).doc(emailLower).get();
+    if (!snapshot.exists) {
+      return null;
+    }
+
+    return {
+      emailLower,
+      ...snapshot.data(),
+    };
+  }
+
+  return verificationRecords.get(emailLower) || null;
+}
+
+async function saveVerificationRecord(email, updates = {}) {
+  const emailLower = normalizeValue(email).toLowerCase();
+  if (!emailLower) {
+    throw new Error('Verification email is required.');
+  }
+
+  const existingRecord = await getVerificationRecord(emailLower);
+  const now = Date.now();
+  const record = {
+    email: updates.email || existingRecord?.email || emailLower,
+    emailLower,
+    code: updates.code ?? existingRecord?.code ?? '',
+    expires: updates.expires ?? existingRecord?.expires ?? 0,
+    verified: updates.verified ?? existingRecord?.verified ?? false,
+    createdAtMs: existingRecord?.createdAtMs || updates.createdAtMs || now,
+    updatedAtMs: updates.updatedAtMs || now,
+    verifiedAtMs: updates.verifiedAtMs ?? existingRecord?.verifiedAtMs ?? null,
+    registeredAtMs: updates.registeredAtMs ?? existingRecord?.registeredAtMs ?? null,
+    registeredUserUid: updates.registeredUserUid ?? existingRecord?.registeredUserUid ?? '',
+    registeredUsername: updates.registeredUsername ?? existingRecord?.registeredUsername ?? '',
+    status: updates.status || existingRecord?.status || 'sent',
+  };
+
+  if (isFirebaseConfigured()) {
+    await ensureFirebaseReady()
+      .collection(VERIFICATION_COLLECTION)
+      .doc(emailLower)
+      .set(
+        {
+          ...record,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    return record;
+  }
+
+  verificationRecords.set(emailLower, record);
+  persistLocalState();
+  return record;
+}
+
+async function listVerificationRecords(limitCount = 10) {
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady()
+      .collection(VERIFICATION_COLLECTION)
+      .orderBy('updatedAtMs', 'desc')
+      .limit(limitCount)
+      .get();
+
+    return snapshot.docs.map(doc => ({ emailLower: doc.id, ...doc.data() }));
+  }
+
+  return [...verificationRecords.values()]
+    .sort((a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0))
+    .slice(0, limitCount);
+}
+
+function getVerificationStatus(record) {
+  if (!record) {
+    return 'unknown';
+  }
+
+  if (record.registeredAtMs) {
+    return 'registered';
+  }
+
+  if (record.verified) {
+    return 'verified';
+  }
+
+  if (record.expires && Date.now() > record.expires) {
+    return 'expired';
+  }
+
+  return 'sent';
 }
 
 function isAuthenticated(req, res, next) {
-  const user = getCookieUser(req);
+  const user = getCookieUser(req) || getCookieUser(req, ADMIN_COOKIE_NAME);
 
   if (!user) {
     res.redirect(buildRedirect('/login', { returnTo: req.originalUrl || req.url || '/dashboard' }));
@@ -563,6 +839,23 @@ function isAuthenticated(req, res, next) {
   }
 
   req.user = user;
+  next();
+}
+
+function requireAdminSession(req, res, next) {
+  const adminUser = getCookieUser(req, ADMIN_COOKIE_NAME);
+
+  if (!adminUser || !isAdminUser(adminUser)) {
+    clearUserCookie(res, ADMIN_COOKIE_NAME);
+    res.redirect(
+      buildRedirect('/admin/login', {
+        returnTo: sanitizeReturnTo(req.originalUrl || req.url || '/admin', '/admin'),
+      })
+    );
+    return;
+  }
+
+  req.user = adminUser;
   next();
 }
 
@@ -610,6 +903,32 @@ app.get('/login', (req, res) => {
   res.sendFile(path.join(__dirname, 'login', 'index.htm'));
 });
 
+app.get('/admin/login', (req, res) => {
+  const returnTo = sanitizeReturnTo(req.query.returnTo, '/admin');
+  const currentAdmin = getCookieUser(req, ADMIN_COOKIE_NAME);
+
+  if (currentAdmin && isAdminUser(currentAdmin)) {
+    res.redirect(returnTo);
+    return;
+  }
+
+  const success = normalizeValue(req.query.success);
+  const error = normalizeValue(req.query.error);
+  const flash = success
+    ? `<div class="flash flash-success">${escapeHtml(success)}</div>`
+    : error
+      ? `<div class="flash flash-error">${escapeHtml(error)}</div>`
+      : '';
+
+  res.send(
+    renderTemplateFile('templates/admin-login.html', {
+      FLASH: flash,
+      RETURN_TO: escapeHtml(returnTo),
+      PRIMARY_ADMIN: escapeHtml([...ADMIN_EMAILS][0] || 'Not configured'),
+    })
+  );
+});
+
 app.get('/login/signup', (req, res) => {
   res.sendFile(path.join(__dirname, 'login', 'signup.htm'));
 });
@@ -623,8 +942,6 @@ app.get('/login/forgot-password', (req, res) => {
 });
 
 // ---------- Email verification for signup ----------
-const verificationCodes = new Map(); // emailLower → { code, expires, verified }
-
 function generateVerificationCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
@@ -642,32 +959,34 @@ app.post('/send-verification-code', async (req, res) => {
   }
 
   try {
-    // Optional: block already-registered emails
-    if (isFirebaseConfigured()) {
-      const existing = await findUserByField('emailLower', email.toLowerCase());
-      if (existing) {
-        return res.status(400).json({ error: 'That email address is already registered.' });
-      }
+    const existing = await findUserByField('emailLower', email.toLowerCase());
+    if (existing) {
+      return res.status(400).json({ error: 'That email address is already registered.' });
+    }
+
+    const existingVerification = await getVerificationRecord(email);
+    if (existingVerification && getVerificationStatus(existingVerification) === 'registered') {
+      return res.status(400).json({ error: 'That email address is already registered.' });
     }
 
     const code = generateVerificationCode();
-    const key = email.toLowerCase();
-
-    verificationCodes.set(key, {
+    await saveVerificationRecord(email, {
+      email,
       code,
-      expires: Date.now() + 10 * 60 * 1000, // 10 minutes
+      expires: Date.now() + 10 * 60 * 1000,
       verified: false,
+      verifiedAtMs: null,
+      registeredAtMs: null,
+      registeredUserUid: '',
+      registeredUsername: '',
+      status: 'sent',
     });
 
-    // Demo style (same as your forgot-password flow).
-    // Replace later with a real email service (nodemailer, SendGrid, etc.).
     console.log(`[Verification] Code for ${email}: ${code}`);
 
     return res.json({
       success: true,
-      message: `A verification code has been sent to ${email}.`,
-      // Remove demoCode in production once real email is wired up
-      demoCode: code,
+      message: `A verification code has been sent to the admin dashboard for ${email}.`,
     });
   } catch (error) {
     return res.status(500).json({
@@ -676,7 +995,7 @@ app.post('/send-verification-code', async (req, res) => {
   }
 });
 
-app.post('/confirm-verification-code', (req, res) => {
+app.post('/confirm-verification-code', async (req, res) => {
   const email = normalizeValue(req.body.email);
   const code = normalizeValue(req.body.code);
 
@@ -684,22 +1003,27 @@ app.post('/confirm-verification-code', (req, res) => {
     return res.status(400).json({ error: 'Email and confirmation code are required.' });
   }
 
-  const key = email.toLowerCase();
-  const entry = verificationCodes.get(key);
+  try {
+    const entry = await getVerificationRecord(email);
+    if (!entry || entry.code !== code || Date.now() > entry.expires) {
+      return res.status(400).json({ error: 'Invalid or expired confirmation code.' });
+    }
 
-  if (!entry || entry.code !== code || Date.now() > entry.expires) {
-    return res.status(400).json({ error: 'Invalid or expired confirmation code.' });
+    await saveVerificationRecord(email, {
+      ...entry,
+      verified: true,
+      verifiedAtMs: Date.now(),
+      expires: Date.now() + 30 * 60 * 1000,
+      status: 'verified',
+    });
+
+    return res.json({
+      success: true,
+      message: 'Email address confirmed successfully.',
+    });
+  } catch (error) {
+    return res.status(500).json({ error: error.message || 'Unable to confirm the code right now.' });
   }
-
-  // Mark as verified so /register can accept it
-  entry.verified = true;
-  entry.expires = Date.now() + 30 * 60 * 1000; // keep verified state for 30 min
-  verificationCodes.set(key, entry);
-
-  return res.json({
-    success: true,
-    message: 'Email address confirmed successfully.',
-  });
 });
 
 // ---------- Register (now requires verified email) ----------
@@ -715,58 +1039,43 @@ app.post('/register', async (req, res) => {
     return;
   }
 
-  // Require email verification
-  const verification = verificationCodes.get(email.toLowerCase());
-  if (!verification || !verification.verified || Date.now() > verification.expires) {
-    res.redirect(
-      buildRedirect('/login/signup', {
-        error: 'Please verify your email address before creating an account.',
-        returnTo,
-      })
-    );
-    return;
-  }
-
-  if (username.length < 4) {
-    res.redirect(
-      buildRedirect('/login/signup', { error: 'Username must be at least 4 characters.' })
-      .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
-    );
-    return;
-  }
-
-  if (password.length < 8) {
-    res.redirect(
-      buildRedirect('/login/signup', { error: 'Password must be at least 8 characters.' })
-      .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
-    );
-    return;
-  }
-
-  if (password !== confirmPassword) {
-    res.redirect(buildRedirect('/login/signup', { error: 'Passwords do not match.', returnTo }));
-    return;
-  }
-
   try {
-    if (isFirebaseConfigured()) {
-      const existingUsername = await findUserByField('usernameLower', username.toLowerCase());
-      if (existingUsername) {
-        res.redirect(
-          buildRedirect('/login/signup', { error: 'That username is already registered.' })
-            .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
-        );
-        return;
-      }
+    const verification = await getVerificationRecord(email);
+    if (!verification || !verification.verified || Date.now() > verification.expires) {
+      res.redirect(
+        buildRedirect('/login/signup', {
+          error: 'Please verify your email address before creating an account.',
+          returnTo,
+        })
+      );
+      return;
+    }
 
-      const existingEmail = await findUserByField('emailLower', email.toLowerCase());
-      if (existingEmail) {
-        res.redirect(
-          buildRedirect('/login/signup', { error: 'That email address is already registered.' })
-            .replace('?', `?returnTo=${encodeURIComponent(returnTo)}&`)
-        );
-        return;
-      }
+    if (username.length < 4) {
+      res.redirect(buildRedirect('/login/signup', { error: 'Username must be at least 4 characters.', returnTo }));
+      return;
+    }
+
+    if (password.length < 8) {
+      res.redirect(buildRedirect('/login/signup', { error: 'Password must be at least 8 characters.', returnTo }));
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      res.redirect(buildRedirect('/login/signup', { error: 'Passwords do not match.', returnTo }));
+      return;
+    }
+
+    const existingUsername = await findUserByField('usernameLower', username.toLowerCase());
+    if (existingUsername) {
+      res.redirect(buildRedirect('/login/signup', { error: 'That username is already registered.', returnTo }));
+      return;
+    }
+
+    const existingEmail = await findUserByField('emailLower', email.toLowerCase());
+    if (existingEmail) {
+      res.redirect(buildRedirect('/login/signup', { error: 'That email address is already registered.', returnTo }));
+      return;
     }
 
     const { salt, hash } = hashPassword(password);
@@ -798,8 +1107,14 @@ app.post('/register', async (req, res) => {
       console.error('Unable to create admin approval record:', applicationError.message);
     }
 
-    // Clean up the verification entry
-    verificationCodes.delete(email.toLowerCase());
+    await saveVerificationRecord(email, {
+      ...verification,
+      expires: Date.now(),
+      registeredAtMs: Date.now(),
+      registeredUserUid: user.uid,
+      registeredUsername: user.username,
+      status: 'registered',
+    });
 
     setUserCookie(res, user);
     res.redirect(returnTo);
@@ -824,10 +1139,7 @@ app.post('/login', async (req, res) => {
   }
 
   try {
-    let user = await findUserByField('usernameLower', username.toLowerCase());
-    if (!user && !isFirebaseConfigured()) {
-      user = demoUsersByUsername.get(username.toLowerCase()) || null;
-    }
+    const user = await findUserForAuthentication(username);
     if (!user || !verifyPassword(password, user.passwordSalt, user.passwordHash)) {
       res.redirect(buildRedirect('/login', { error: 'Invalid username or password.', returnTo }));
       return;
@@ -839,6 +1151,41 @@ app.post('/login', async (req, res) => {
     res.redirect(
       buildRedirect('/login', {
         error: error.message || 'Unable to sign you in right now.',
+        returnTo,
+      })
+    );
+  }
+});
+
+app.post('/admin/login', async (req, res) => {
+  const identifier = normalizeValue(req.body.identifier);
+  const password = normalizeValue(req.body.password);
+  const returnTo = sanitizeReturnTo(req.body.returnTo, '/admin');
+
+  if (!identifier || !password) {
+    res.redirect(buildRedirect('/admin/login', { error: 'Enter your admin username or email and password.', returnTo }));
+    return;
+  }
+
+  try {
+    const user = await findUserForAuthentication(identifier);
+    if (!user || !verifyPassword(password, user.passwordSalt, user.passwordHash)) {
+      res.redirect(buildRedirect('/admin/login', { error: 'Invalid admin credentials.', returnTo }));
+      return;
+    }
+
+    if (!isAdminUser(user)) {
+      res.redirect(buildRedirect('/admin/login', { error: 'This account is not approved for admin access.', returnTo }));
+      return;
+    }
+
+    setUserCookie(res, user);
+    setUserCookie(res, user, ADMIN_COOKIE_NAME);
+    res.redirect(returnTo);
+  } catch (error) {
+    res.redirect(
+      buildRedirect('/admin/login', {
+        error: error.message || 'Unable to sign in to the admin workspace right now.',
         returnTo,
       })
     );
@@ -1257,10 +1604,11 @@ app.post('/apply', isAuthenticated, async (req, res) => {
   }
 });
 
-app.get('/admin', isAuthenticated, requireAdmin, async (req, res) => {
+app.get('/admin', requireAdminSession, async (req, res) => {
   try {
     const applications = await listApplications();
     const users = await listPortalUsers();
+    const verificationItems = await listVerificationRecords(10);
     const pendingCount = applications.filter(item => item.status === 'pending').length;
     const inReviewCount = applications.filter(item => item.status === 'in_review').length;
     const approvedCount = applications.filter(item => item.status === 'approved').length;
@@ -1353,6 +1701,17 @@ app.get('/admin', isAuthenticated, requireAdmin, async (req, res) => {
         `).join('')
       : '<tr><td colspan="4">No registered users found.</td></tr>';
 
+    const verificationMarkup = verificationItems.length
+      ? verificationItems.map(item => `
+          <tr>
+            <td>${escapeHtml(item.email || item.emailLower || 'Unknown')}</td>
+            <td><span class="code-chip">${escapeHtml(item.code || 'N/A')}</span></td>
+            <td>${escapeHtml(getVerificationStatus(item))}</td>
+            <td>${escapeHtml(formatDateTime(item.updatedAtMs || item.createdAtMs))}</td>
+          </tr>
+        `).join('')
+      : '<tr><td colspan="4">No verification codes have been issued yet.</td></tr>';
+
     const activityMarkup = latestActivity.length
       ? latestActivity.map(item => `
           <li>
@@ -1369,15 +1728,21 @@ app.get('/admin', isAuthenticated, requireAdmin, async (req, res) => {
       renderTemplateFile('templates/admin-control-centre.html', {
         FLASH: flash,
         CURRENT_USER: escapeHtml(req.user.email || req.user.username),
-        STORAGE_MODE: escapeHtml(isFirebaseConfigured() ? 'Firebase' : 'Demo memory store'),
+        STORAGE_MODE: escapeHtml(isFirebaseConfigured() ? 'Firebase / Firestore' : 'Local JSON database'),
         PENDING_COUNT: pendingCount,
         IN_REVIEW_COUNT: inReviewCount,
         APPROVED_COUNT: approvedCount,
         URGENT_COUNT: urgentCount,
         APPLICATION_MARKUP: applicationMarkup,
         USER_MARKUP: userMarkup,
+        VERIFICATION_MARKUP: verificationMarkup,
         ACTIVITY_MARKUP: activityMarkup,
-        APPROVAL_STORAGE_TEXT: escapeHtml(isFirebaseConfigured() ? 'Firestore-backed production storage.' : 'Demo in-memory storage for local testing.'),
+        APPROVAL_STORAGE_TEXT: escapeHtml(isFirebaseConfigured() ? 'Firestore-backed production storage.' : `Local JSON database at ${LOCAL_DATABASE_FILE}`),
+        USER_STORAGE_TEXT: escapeHtml(
+          isFirebaseConfigured()
+            ? `Hashed credentials stored in Firestore collection "${SECURE_USER_COLLECTION}".`
+            : 'Hashed credentials stored in the local JSON fallback database.'
+        ),
         PRIMARY_ADMIN: escapeHtml([...ADMIN_EMAILS][0] || 'Not configured'),
       })
     );
@@ -1386,7 +1751,7 @@ app.get('/admin', isAuthenticated, requireAdmin, async (req, res) => {
   }
 });
 
-app.post('/admin/applications/:id/status', isAuthenticated, requireAdmin, async (req, res) => {
+app.post('/admin/applications/:id/status', requireAdminSession, async (req, res) => {
   const id = normalizeValue(req.params.id);
   const status = normalizeValue(req.body.status);
   const note = normalizeValue(req.body.note);
@@ -1400,11 +1765,15 @@ app.post('/admin/applications/:id/status', isAuthenticated, requireAdmin, async 
 });
 
 app.get('/logout', (req, res) => {
-  res.clearCookie('user');
+  clearUserCookie(res, USER_COOKIE_NAME);
+  clearUserCookie(res, ADMIN_COOKIE_NAME);
   res.redirect('/');
 });
 
-const resetCodes = new Map();
+app.get('/admin/logout', (req, res) => {
+  clearUserCookie(res, ADMIN_COOKIE_NAME);
+  res.redirect(buildRedirect('/admin/login', { success: 'Admin session ended successfully.' }));
+});
 
 function generateResetCode() {
   return Math.floor(100000 + Math.random() * 900000).toString();

@@ -157,6 +157,19 @@
     .table{width:100%;border-collapse:collapse;font-size:14px}
     .table th,.table td{text-align:left;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06)}
     .table th{color:#8ca3c4;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+    .code-chip{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:78px;
+      padding:7px 10px;
+      border-radius:999px;
+      background:rgba(255,106,26,.14);
+      border:1px solid rgba(255,106,26,.22);
+      color:#ffd8c3;
+      font-weight:700;
+      letter-spacing:.08em;
+    }
     .timeline{list-style:none;margin:0;padding:0;display:grid;gap:12px}
     .timeline li{display:flex;justify-content:space-between;gap:12px;padding:14px 0;border-bottom:1px solid rgba(255,255,255,.06)}
     .timeline li div{display:grid;gap:4px}
@@ -199,10 +212,11 @@
         <a class="active" href="/admin"><strong>Overview</strong><span>Live metrics, approval queue, user operations.</span></a>
         <a href="#queue"><strong>Approval Queue</strong><span>Review pending, in-progress, and resolved items.</span></a>
         <a href="#users"><strong>Portal Users</strong><span>Track registrations and access activity.</span></a>
+        <a href="#verification-codes"><strong>Verification Codes</strong><span>Monitor signup codes as they are issued.</span></a>
         <a href="#activity"><strong>Activity Feed</strong><span>Audit trail of recent admin actions.</span></a>
         <a href="/apply"><strong>New Application</strong><span>Open the live website intake form used by applicants.</span></a>
         <a href="/dashboard"><strong>User Dashboard</strong><span>Return to the standard signed-in experience.</span></a>
-        <a href="/logout"><strong>Sign Out</strong><span>Exit the control centre securely.</span></a>
+        <a href="/admin/logout"><strong>Sign Out</strong><span>Exit the control centre securely.</span></a>
       </nav>
       <div class="sidebar-footer">
         Logged in as <strong>{{CURRENT_USER}}</strong><br>
@@ -276,6 +290,24 @@
             </table>
           </section>
 
+          <section class="panel" id="verification-codes">
+            <h3>Verification Codes</h3>
+            <p class="lead">Codes requested during account signup are streamed here for the admin team to review.</p>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Email</th>
+                  <th>Code</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                </tr>
+              </thead>
+              <tbody>
+                {{VERIFICATION_MARKUP}}
+              </tbody>
+            </table>
+          </section>
+
           <section class="panel" id="activity">
             <h3>Recent Activity</h3>
             <p class="lead">Latest actions captured in the approval history.</p>
@@ -293,6 +325,10 @@
               <div class="system-item">
                 <strong>Approval storage</strong>
                 {{APPROVAL_STORAGE_TEXT}}
+              </div>
+              <div class="system-item">
+                <strong>Secure user collection</strong>
+                {{USER_STORAGE_TEXT}}
               </div>
               <div class="system-item">
                 <strong>Primary admin account</strong>

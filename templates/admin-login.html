@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin Sign In - Immigration New Zealand</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#08111f;
+      --panel:#0e192b;
+      --line:#233554;
+      --text:#edf3ff;
+      --muted:#9bb0cc;
+      --accent:#ff6a1a;
+      --accent-strong:#ff8a4c;
+      --success:#24c58a;
+      --danger:#ff7b7b;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      min-height:100vh;
+      font-family:"Inter",Arial,sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(90,168,255,.12), transparent 28%),
+        radial-gradient(circle at top right, rgba(255,106,26,.16), transparent 32%),
+        linear-gradient(180deg,#07101c 0%, #091321 100%);
+      display:grid;
+      place-items:center;
+      padding:24px;
+    }
+    a{color:#b7d8ff}
+    .shell{
+      width:min(1120px,100%);
+      display:grid;
+      grid-template-columns:minmax(320px,.95fr) minmax(360px,.9fr);
+      background:rgba(9,18,31,.9);
+      border:1px solid rgba(255,255,255,.08);
+      border-radius:30px;
+      overflow:hidden;
+      box-shadow:0 28px 80px rgba(0,0,0,.38);
+    }
+    .intro{
+      padding:44px;
+      background:
+        linear-gradient(160deg, rgba(255,106,26,.18), rgba(12,24,41,.86)),
+        rgba(9,18,31,.92);
+      border-right:1px solid rgba(255,255,255,.06);
+    }
+    .eyebrow{
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding:8px 12px;
+      border-radius:999px;
+      background:rgba(255,106,26,.14);
+      border:1px solid rgba(255,106,26,.22);
+      color:#ffd4bc;
+      font-size:12px;
+      font-weight:700;
+      letter-spacing:.08em;
+      text-transform:uppercase;
+    }
+    h1{
+      margin:22px 0 14px;
+      font-size:42px;
+      line-height:1.05;
+      letter-spacing:-.05em;
+    }
+    .lead{
+      margin:0;
+      color:#d8e3f4;
+      line-height:1.75;
+      font-size:15px;
+      max-width:560px;
+    }
+    .info-grid{
+      display:grid;
+      gap:14px;
+      margin-top:28px;
+    }
+    .info-card{
+      padding:16px 18px;
+      border-radius:18px;
+      background:rgba(255,255,255,.04);
+      border:1px solid rgba(255,255,255,.06);
+    }
+    .info-card strong{
+      display:block;
+      margin-bottom:6px;
+      font-size:14px;
+    }
+    .info-card p{
+      margin:0;
+      color:var(--muted);
+      line-height:1.6;
+      font-size:13px;
+    }
+    .panel{
+      padding:44px;
+      display:grid;
+      align-content:center;
+      gap:18px;
+    }
+    .panel-top h2{
+      margin:0;
+      font-size:28px;
+      letter-spacing:-.03em;
+    }
+    .panel-top p{
+      margin:8px 0 0;
+      color:var(--muted);
+      line-height:1.65;
+      font-size:14px;
+    }
+    .flash{
+      padding:14px 16px;
+      border-radius:14px;
+      border:1px solid transparent;
+      font-size:14px;
+      line-height:1.55;
+    }
+    .flash-success{
+      background:rgba(36,197,138,.14);
+      border-color:rgba(36,197,138,.24);
+      color:#c7ffea;
+    }
+    .flash-error{
+      background:rgba(255,123,123,.14);
+      border-color:rgba(255,123,123,.24);
+      color:#ffd6d6;
+    }
+    .form{
+      display:grid;
+      gap:14px;
+    }
+    label{
+      display:grid;
+      gap:8px;
+      font-size:13px;
+      font-weight:600;
+    }
+    input{
+      width:100%;
+      border-radius:14px;
+      border:1px solid rgba(255,255,255,.08);
+      background:#091321;
+      color:var(--text);
+      padding:14px 16px;
+      font:inherit;
+    }
+    input:focus{
+      outline:none;
+      border-color:rgba(255,106,26,.48);
+      box-shadow:0 0 0 3px rgba(255,106,26,.12);
+    }
+    .actions{
+      display:flex;
+      gap:12px;
+      flex-wrap:wrap;
+      margin-top:6px;
+    }
+    .btn{
+      appearance:none;
+      border:none;
+      border-radius:14px;
+      padding:14px 18px;
+      font:inherit;
+      font-weight:700;
+      cursor:pointer;
+      text-decoration:none;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .btn-primary{
+      background:linear-gradient(135deg,var(--accent),var(--accent-strong));
+      color:#fff;
+      min-width:180px;
+    }
+    .btn-secondary{
+      background:rgba(255,255,255,.06);
+      color:var(--text);
+      border:1px solid rgba(255,255,255,.08);
+    }
+    .hint{
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.6;
+    }
+    .hint strong{color:#fff}
+    @media (max-width:920px){
+      .shell{grid-template-columns:1fr}
+      .intro{border-right:none;border-bottom:1px solid rgba(255,255,255,.06)}
+    }
+    @media (max-width:640px){
+      body{padding:14px}
+      .intro,.panel{padding:26px}
+      h1{font-size:34px}
+      .actions{flex-direction:column}
+      .btn{width:100%}
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="intro">
+      <div class="eyebrow">Official Admin Access</div>
+      <h1>Control the portal from a separate server login.</h1>
+      <p class="lead">This admin sign-in is isolated from the public user login. Use it to review verification codes, approve registrations, and manage operations directly from the server-backed dashboard.</p>
+
+      <div class="info-grid">
+        <div class="info-card">
+          <strong>Primary admin account</strong>
+          <p>{{PRIMARY_ADMIN}}</p>
+        </div>
+        <div class="info-card">
+          <strong>What happens here</strong>
+          <p>Verification-code requests, approval activity, and registered-user records are all available inside the admin dashboard after sign-in.</p>
+        </div>
+        <div class="info-card">
+          <strong>Need the standard login instead?</strong>
+          <p><a href="/login">Return to the public portal sign-in</a>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-top">
+        <h2>Admin Sign In</h2>
+        <p>Enter an approved admin username or email plus password to open the control centre.</p>
+      </div>
+
+      {{FLASH}}
+
+      <form class="form" action="/admin/login" method="POST">
+        <input type="hidden" name="returnTo" value="{{RETURN_TO}}">
+
+        <label for="username">
+          Admin username or email
+          <input id="username" type="text" name="identifier" autocomplete="username" placeholder="admin@example.com" required autofocus>
+        </label>
+
+        <label for="password">
+          Password
+          <input id="password" type="password" name="password" autocomplete="current-password" placeholder="Enter password" required>
+        </label>
+
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">Open Admin Dashboard</button>
+          <a class="btn btn-secondary" href="/login">Go To User Login</a>
+        </div>
+      </form>
+
+      <p class="hint"><strong>Server note:</strong> this page uses a dedicated admin session cookie and routes successful sign-ins back to the requested admin page automatically.</p>
+    </section>
+  </main>
+</body>
+</html>
