@@ -42,6 +42,22 @@
       color:#f5f7fb;padding:10px 14px;border-radius:10px;font-size:13px;font-weight:600
     }
     .nav a.active,.nav a:hover{background:rgba(255,255,255,.08)}
+    .menu-toggle{
+      display:none;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.06);
+      border-radius:14px;
+      height:44px;
+      width:48px;
+      padding:0;
+      cursor:pointer;
+      align-items:center;
+      justify-content:center;
+      color:#fff;
+    }
+    .menu-toggle:focus{outline:none;box-shadow:0 0 0 3px rgba(227,82,5,.28);border-color:rgba(227,82,5,.52)}
+    .menu-lines{display:grid;gap:5px}
+    .menu-lines span{display:block;width:18px;height:2px;border-radius:999px;background:rgba(255,255,255,.9)}
     .page{max-width:1240px;margin:0 auto;padding:28px}
     .hero{
       background:linear-gradient(135deg,#10192b 0,#1d2b44 58%,#ef6b22 160%);
@@ -110,10 +126,13 @@
     @media (max-width:1080px){
       .hero,.layout{grid-template-columns:1fr}
     }
-    @media (max-width:700px){
+    @media (max-width:900px){
       .page{padding:14px}
       .topbar-inner{padding:14px 16px}
-      .nav{display:none}
+      .menu-toggle{display:inline-flex}
+      .nav{display:none;width:100%;flex-direction:column;gap:6px;padding-top:14px;flex-basis:100%}
+      .topbar.is-open .nav{display:flex}
+      .nav a{padding:12px 12px;border-radius:12px}
       .brand{align-items:flex-start}
       .brand-mark{width:38px;height:38px;border-radius:10px}
       .brand-copy strong{font-size:15px}
@@ -144,7 +163,14 @@
           <span>Application intake and approvals</span>
         </div>
       </div>
-      <nav class="nav">
+      <button class="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="apply-nav">
+        <span class="menu-lines" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+        </span>
+      </button>
+      <nav class="nav" id="apply-nav">
         <a href="/">Home</a>
         <a href="/visas">Visas</a>
         <a href="/apply" class="active">Apply</a>
@@ -265,5 +291,37 @@
       </div>
     </section>
   </main>
+  <script>
+    (function () {
+      var header = document.querySelector('.topbar');
+      if (!header) return;
+      var toggle = header.querySelector('.menu-toggle');
+      var nav = document.getElementById('apply-nav');
+      if (!toggle || !nav) return;
+
+      function setOpen(next) {
+        header.classList.toggle('is-open', next);
+        toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+      }
+
+      toggle.addEventListener('click', function () {
+        setOpen(!header.classList.contains('is-open'));
+      });
+
+      nav.addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target) return;
+        if (target.closest && target.closest('a')) {
+          setOpen(false);
+        }
+      });
+
+      window.addEventListener('resize', function () {
+        if (window.innerWidth > 900) {
+          setOpen(false);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>

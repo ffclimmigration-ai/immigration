@@ -9,7 +9,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3002;
 const COOKIE_MAX_AGE = 60 * 60 * 1000;
 const USER_COOKIE_NAME = 'user';
 const ADMIN_COOKIE_NAME = 'admin_user';

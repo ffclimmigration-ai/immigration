@@ -48,6 +48,7 @@
       top:0;
       height:100vh;
     }
+    .sidebar-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
     .brand{display:flex;align-items:center;gap:14px;margin-bottom:26px}
     .brand-mark{
       width:48px;height:48px;border-radius:14px;display:grid;place-items:center;
@@ -61,6 +62,22 @@
       text-transform:uppercase;padding:8px 10px;border-radius:999px;background:var(--accent-soft);
       color:#ffd5bd;border:1px solid rgba(255,106,26,.22);margin-bottom:28px;
     }
+    .menu-toggle{
+      display:none;
+      border:1px solid rgba(255,255,255,.10);
+      background:rgba(255,255,255,.05);
+      color:var(--text);
+      border-radius:14px;
+      height:44px;
+      width:48px;
+      cursor:pointer;
+      align-items:center;
+      justify-content:center;
+      padding:0;
+    }
+    .menu-toggle:focus{outline:none;box-shadow:0 0 0 3px rgba(255,106,26,.22);border-color:rgba(255,106,26,.45)}
+    .menu-lines{display:grid;gap:5px}
+    .menu-lines span{display:block;width:18px;height:2px;border-radius:999px;background:rgba(255,255,255,.86)}
     .side-links{display:grid;gap:10px}
     .side-links a{
       text-decoration:none;color:#d7e2f4;background:rgba(255,255,255,.03);
@@ -183,8 +200,15 @@
     .empty-state{padding:28px;border-radius:20px;border:1px dashed rgba(255,255,255,.14);text-align:center;color:var(--muted)}
     @media (max-width:1180px){
       .shell{grid-template-columns:1fr}
-      .sidebar{position:relative;height:auto;border-right:none;border-bottom:1px solid rgba(255,255,255,.06)}
-      .sidebar-footer{position:static;margin-top:24px}
+      .sidebar{position:relative;height:auto;border-right:none;border-bottom:1px solid rgba(255,255,255,.06);padding:18px 18px}
+      .sidebar-head{align-items:center}
+      .brand{margin-bottom:0}
+      .admin-badge{margin:14px 0 0}
+      .menu-toggle{display:inline-flex}
+      .side-links{display:none;margin-top:18px}
+      .sidebar-footer{display:none;position:static;margin-top:18px}
+      .sidebar.is-open .side-links{display:grid}
+      .sidebar.is-open .sidebar-footer{display:block}
       .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
       .layout{grid-template-columns:1fr}
     }
@@ -199,16 +223,25 @@
 </head>
 <body>
   <div class="shell">
-    <aside class="sidebar">
-      <div class="brand">
-        <div class="brand-mark">INZ</div>
-        <div>
-          <h1>Admin Control Centre</h1>
-          <p>Website operations and approvals</p>
+    <aside class="sidebar" id="admin-sidebar">
+      <div class="sidebar-head">
+        <div class="brand">
+          <div class="brand-mark">INZ</div>
+          <div>
+            <h1>Admin Control Centre</h1>
+            <p>Website operations and approvals</p>
+          </div>
         </div>
+        <button class="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" aria-controls="admin-nav">
+          <span class="menu-lines" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+        </button>
       </div>
       <div class="admin-badge">Official Admin</div>
-      <nav class="side-links">
+      <nav class="side-links" id="admin-nav">
         <a class="active" href="/admin"><strong>Overview</strong><span>Live metrics, approval queue, user operations.</span></a>
         <a href="#queue"><strong>Approval Queue</strong><span>Review pending, in-progress, and resolved items.</span></a>
         <a href="#users"><strong>Portal Users</strong><span>Track registrations and access activity.</span></a>
@@ -340,5 +373,37 @@
       </section>
     </main>
   </div>
+  <script>
+    (function () {
+      var sidebar = document.getElementById('admin-sidebar');
+      if (!sidebar) return;
+      var toggle = sidebar.querySelector('.menu-toggle');
+      var nav = document.getElementById('admin-nav');
+      if (!toggle || !nav) return;
+
+      function setOpen(next) {
+        sidebar.classList.toggle('is-open', next);
+        toggle.setAttribute('aria-expanded', next ? 'true' : 'false');
+      }
+
+      toggle.addEventListener('click', function () {
+        setOpen(!sidebar.classList.contains('is-open'));
+      });
+
+      nav.addEventListener('click', function (event) {
+        var target = event.target;
+        if (!target) return;
+        if (target.closest && target.closest('a')) {
+          setOpen(false);
+        }
+      });
+
+      window.addEventListener('resize', function () {
+        if (window.innerWidth > 1180) {
+          setOpen(false);
+        }
+      });
+    })();
+  </script>
 </body>
 </html>
