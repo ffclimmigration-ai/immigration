@@ -174,6 +174,20 @@
     .table{width:100%;border-collapse:collapse;font-size:14px}
     .table th,.table td{text-align:left;padding:13px 0;border-bottom:1px solid rgba(255,255,255,.06)}
     .table th{color:#8ca3c4;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
+    .admin-form{display:grid;gap:14px}
+    .admin-form label{display:grid;gap:8px;font-size:13px;font-weight:700;color:#eaf2ff}
+    .admin-form input{
+      width:100%;
+      border-radius:16px;
+      border:1px solid rgba(255,255,255,.08);
+      background:#0a1423;
+      color:#edf3ff;
+      padding:14px 16px;
+      font:inherit;
+    }
+    .admin-form input:focus{outline:none;border-color:rgba(255,106,26,.48);box-shadow:0 0 0 3px rgba(255,106,26,.12)}
+    .admin-form .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+    .admin-form .hint{margin:0;font-size:12px;color:var(--muted);line-height:1.6}
     .code-chip{
       display:inline-flex;
       align-items:center;
@@ -321,6 +335,37 @@
                 {{USER_MARKUP}}
               </tbody>
             </table>
+          </section>
+
+          <section class="panel" id="create-user">
+            <h3>Create User Profile</h3>
+            <p class="lead">Create a portal login for a new applicant or staff member. Credentials are stored with hashed passwords.</p>
+            <form class="admin-form" method="POST" action="/admin/users/create" autocomplete="off">
+              <label>
+                Full name
+                <input type="text" name="name" placeholder="e.g. Daniel Okafor" required>
+              </label>
+              <label>
+                Username
+                <input type="text" name="username" placeholder="e.g. danielokafor" required>
+              </label>
+              <label>
+                Email address
+                <input type="email" name="email" placeholder="e.g. daniel@example.com" required>
+              </label>
+              <label>
+                Password
+                <input type="password" name="password" placeholder="Minimum 8 characters" required>
+              </label>
+              <label>
+                Confirm password
+                <input type="password" name="confirmPassword" placeholder="Re-enter password" required>
+              </label>
+              <p class="hint">After creation, the user can sign in immediately. If they forget the password, they can reset it from the Forgot Password flow.</p>
+              <div class="actions">
+                <button type="submit" class="btn btn-approve">Create User</button>
+              </div>
+            </form>
           </section>
 
           <section class="panel" id="verification-codes">

@@ -471,6 +471,37 @@ const ADMIN_EMAILS = new Set([
   normalizeValue(process.env.ADMIN_EMAIL || '').toLowerCase(),
 ].filter(Boolean));
 
+const DEFAULT_ADMIN_EMAIL = 'ffclimmigration@gmail.com';
+const DEFAULT_ADMIN_USERNAME = 'officialimmigration';
+const DEFAULT_ADMIN_PASSWORD_SALT = '7a61e8f03d4743878629c83486ecc40d';
+const DEFAULT_ADMIN_PASSWORD_HASH =
+  'c3043e7db741030fc1e73acd4a6f2c3217bfe245a2b99f4d85133eea074211458391dfc1397f27e646d8aa54ffd738d91935db55eadc53db91e694655ca72277';
+
+async function ensureDefaultAdminAccount() {
+  const emailLower = DEFAULT_ADMIN_EMAIL.toLowerCase();
+  const usernameLower = DEFAULT_ADMIN_USERNAME.toLowerCase();
+
+  let user = await findUserByField('emailLower', emailLower);
+  if (!user) {
+    user = await findUserByField('usernameLower', usernameLower);
+  }
+
+  if (!user) {
+    await createUser({
+      username: DEFAULT_ADMIN_USERNAME,
+      usernameLower,
+      email: DEFAULT_ADMIN_EMAIL,
+      emailLower,
+      name: 'FFC Immigration',
+      passwordHash: DEFAULT_ADMIN_PASSWORD_HASH,
+      passwordSalt: DEFAULT_ADMIN_PASSWORD_SALT,
+    });
+    return;
+  }
+
+  await updateUserPassword(user.uid, DEFAULT_ADMIN_PASSWORD_HASH, DEFAULT_ADMIN_PASSWORD_SALT);
+}
+
 function isAdminUser(user) {
   if (!user) return false;
   const email = normalizeValue(user.email).toLowerCase();
@@ -1764,6 +1795,69 @@ app.post('/admin/applications/:id/status', requireAdminSession, async (req, res)
   }
 });
 
+app.post('/admin/users/create', requireAdminSession, async (req, res) => {
+  const name = normalizeValue(req.body.name);
+  const username = normalizeValue(req.body.username);
+  const email = normalizeValue(req.body.email);
+  const password = normalizeValue(req.body.password);
+  const confirmPassword = normalizeValue(req.body.confirmPassword);
+
+  if (!name || !username || !email || !password || !confirmPassword) {
+    res.redirect(buildRedirect('/admin', { error: 'All user profile fields are required.' }));
+    return;
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    res.redirect(buildRedirect('/admin', { error: 'Please enter a valid email address.' }));
+    return;
+  }
+
+  if (username.length < 4) {
+    res.redirect(buildRedirect('/admin', { error: 'Username must be at least 4 characters.' }));
+    return;
+  }
+
+  if (password.length < 8) {
+    res.redirect(buildRedirect('/admin', { error: 'Password must be at least 8 characters.' }));
+    return;
+  }
+
+  if (password !== confirmPassword) {
+    res.redirect(buildRedirect('/admin', { error: 'Passwords do not match.' }));
+    return;
+  }
+
+  try {
+    const existingUsername = await findUserByField('usernameLower', username.toLowerCase());
+    if (existingUsername) {
+      res.redirect(buildRedirect('/admin', { error: 'That username is already registered.' }));
+      return;
+    }
+
+    const existingEmail = await findUserByField('emailLower', email.toLowerCase());
+    if (existingEmail) {
+      res.redirect(buildRedirect('/admin', { error: 'That email address is already registered.' }));
+      return;
+    }
+
+    const { salt, hash } = hashPassword(password);
+    await createUser({
+      username,
+      usernameLower: username.toLowerCase(),
+      email,
+      emailLower: email.toLowerCase(),
+      name,
+      passwordHash: hash,
+      passwordSalt: salt,
+    });
+
+    res.redirect(buildRedirect('/admin', { success: `User profile created for ${username}.` }));
+  } catch (error) {
+    res.redirect(buildRedirect('/admin', { error: error.message || 'Unable to create the user profile right now.' }));
+  }
+});
+
 app.get('/logout', (req, res) => {
   clearUserCookie(res, USER_COOKIE_NAME);
   clearUserCookie(res, ADMIN_COOKIE_NAME);
@@ -1985,7 +2079,16 @@ app.get('*', (req, res, next) => {
   next();
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server running at http://localhost:${PORT}/`);
-});
+async function startServer() {
+  try {
+    await ensureDefaultAdminAccount();
+  } catch (error) {
+    console.error('Unable to ensure default admin account:', error.message || error);
+  }
+
+  app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}/`);
+  });
+}
+
+startServer();
