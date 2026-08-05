@@ -258,6 +258,8 @@
       <nav class="side-links" id="admin-nav">
         <a class="active" href="/admin"><strong>Overview</strong><span>Live metrics, approval queue, user operations.</span></a>
         <a href="#queue"><strong>Approval Queue</strong><span>Review pending, in-progress, and resolved items.</span></a>
+        <a href="#documents"><strong>Documents</strong><span>Review user uploads, approve or reject each file.</span></a>
+        <a href="#payments"><strong>Payments</strong><span>Approve bank transfers, verify proof of payment.</span></a>
         <a href="#users"><strong>Portal Users</strong><span>Track registrations and access activity.</span></a>
         <a href="#verification-codes"><strong>Verification Codes</strong><span>Monitor signup codes as they are issued.</span></a>
         <a href="#activity"><strong>Activity Feed</strong><span>Audit trail of recent admin actions.</span></a>
@@ -315,6 +317,22 @@
           <p class="lead">Review website-related submissions, account access requests, and approval workflows without leaving the portal.</p>
           <div class="queue-list">
             {{APPLICATION_MARKUP}}
+          </div>
+        </div>
+
+        <div class="panel" id="documents">
+          <h3>Document Review Queue</h3>
+          <p class="lead">Every passport, identity, medical, and proof documents uploaded from the user dashboard. Approve each file to unlock the portal payment workflow.</p>
+          <div class="queue-list">
+            {{DOCUMENT_MARKUP}}
+          </div>
+        </div>
+
+        <div class="panel" id="payments">
+          <h3>Payment Review Queue</h3>
+          <p class="lead">Bank transfers and card payment requests made after document approval. Confirm proof documents, reconcile references, and mark payments as paid or rejected.</p>
+          <div class="queue-list">
+            {{PAYMENT_MARKUP}}
           </div>
         </div>
 

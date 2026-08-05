@@ -18,6 +18,31 @@ const SECURE_USER_COLLECTION = process.env.SECURE_USER_COLLECTION || 'secureUser
 const LEGACY_USER_COLLECTION = 'users';
 const APPLICATION_COLLECTION = process.env.APPLICATION_COLLECTION || 'applications';
 const VERIFICATION_COLLECTION = process.env.VERIFICATION_COLLECTION || 'verificationCodes';
+const DOCUMENT_COLLECTION = process.env.DOCUMENT_COLLECTION || 'documents';
+const PAYMENT_COLLECTION = process.env.PAYMENT_COLLECTION || 'payments';
+const DOCUMENT_UPLOAD_DIR = path.join(__dirname, 'uploads', 'documents');
+const MAX_DOCUMENT_SIZE_BYTES = 12 * 1024 * 1024;
+const ALLOWED_DOCUMENT_EXTENSIONS = new Set([
+  '.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.rtf',
+]);
+const REQUIRED_DOCUMENT_TYPES = [
+  'Passport',
+  'Proof of identity',
+  'Proof of residence / address',
+  'Police / character certificate',
+  'Medical certificate',
+  'Employment / sponsorship evidence',
+  'Financial / bank evidence',
+  'Educational qualification',
+  'English language evidence',
+  'Other supporting document',
+];
+const APPLICATION_FEE_CENTS = 49500;
+const APPLICATION_FEE_LABEL = 'Application processing fee';
+const PAYMENT_METHODS = [
+  { id: 'card', label: 'Card payment (Stripe)', description: 'Secure online card payment processed by Stripe.' },
+  { id: 'bank', label: 'Bank transfer', description: 'Manual bank transfer with reference number and upload proof of payment.' },
+];
 
 let admin = null;
 let db = null;
@@ -57,6 +82,51 @@ try {
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.use(cookieParser());
+
+// File upload handling for documents. Documents are always stored server-side
+// (local disk or Firestore base64 payload) depending on Firebase configuration.
+let multer = null;
+let documentUploadHandler = null;
+try {
+  multer = require('multer');
+  const storage = multer.memoryStorage();
+  documentUploadHandler = multer({
+    storage,
+    limits: {
+      fileSize: MAX_DOCUMENT_SIZE_BYTES,
+      files: 1,
+    },
+    fileFilter: (req, file, callback) => {
+      if (!file || !file.originalname) {
+        callback(new Error('Document file is required.'));
+        return;
+      }
+      const ext = getAllowedDocumentExtension(file.originalname);
+      if (!ext) {
+        callback(new Error('Document type is not allowed. Allowed types: PDF, image, Word, Excel, text.'));
+        return;
+      }
+      callback(null, true);
+    },
+  });
+} catch (error) {
+  documentUploadHandler = null;
+}
+
+function handleDocumentUpload(req, res, next) {
+  if (!documentUploadHandler) {
+    return next(new Error('Document uploads are not available right now. Please try again later.'));
+  }
+  documentUploadHandler.single('file')(req, res, error => {
+    if (error) {
+      const message = error && error.code === 'LIMIT_FILE_SIZE'
+        ? `Document is too large. Maximum size is ${humanizeBytes(MAX_DOCUMENT_SIZE_BYTES)}.`
+        : (error && error.message ? error.message : 'Document upload failed.');
+      return next(new Error(message));
+    }
+    next();
+  });
+}
 
 // Serve static files
 app.use(express.static(path.join(__dirname)));
@@ -131,14 +201,66 @@ function isFirebaseConfigured() {
   return !!db;
 }
 
+function ensureUploadDirectory() {
+  if (!fs.existsSync(DOCUMENT_UPLOAD_DIR)) {
+    fs.mkdirSync(DOCUMENT_UPLOAD_DIR, { recursive: true });
+  }
+}
+
+ensureUploadDirectory();
+
+function formatCurrencyCents(cents) {
+  const amount = (Number(cents) || 0) / 100;
+  return new Intl.NumberFormat('en-NZ', {
+    style: 'currency',
+    currency: 'NZD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function getDocumentStatusBadge(status) {
+  const clean = normalizeValue(status) || 'pending';
+  switch (clean) {
+    case 'approved':
+      return { label: 'Approved', className: 'status-approved' };
+    case 'rejected':
+      return { label: 'Rejected', className: 'status-rejected' };
+    case 'in_review':
+      return { label: 'In review', className: 'status-in_review' };
+    case 'pending':
+    default:
+      return { label: 'Awaiting review', className: 'status-pending' };
+  }
+}
+
+function getPaymentStatusBadge(status) {
+  const clean = normalizeValue(status) || 'pending';
+  switch (clean) {
+    case 'paid':
+      return { label: 'Paid', className: 'status-approved' };
+    case 'rejected':
+      return { label: 'Failed', className: 'status-rejected' };
+    case 'in_review':
+      return { label: 'Verifying payment', className: 'status-in_review' };
+    case 'pending':
+    default:
+      return { label: 'Payment pending', className: 'status-pending' };
+  }
+}
+
 // Persistent local JSON fallback store when Firebase is not configured.
-// This keeps local users, applications, and verification records between
-// restarts. Firestore is still used automatically once Firebase credentials
-// are configured in .env.
+// This keeps local users, applications, documents, payments and verification
+// records between restarts. Firestore is still used automatically once
+// Firebase credentials are configured in .env.
 const demoUsersByUid = new Map();
 const demoUsersByUsername = new Map();
 const demoUsersByEmail = new Map();
 const demoApplications = new Map();
+const demoDocuments = new Map();
+const demoDocumentsByUser = new Map();
+const demoPayments = new Map();
+const demoPaymentsByUser = new Map();
 const verificationRecords = new Map();
 const resetCodes = new Map();
 
@@ -146,6 +268,8 @@ function getDefaultLocalDatabase() {
   return {
     users: [],
     applications: [],
+    documents: [],
+    payments: [],
     verifications: [],
   };
 }
@@ -175,6 +299,8 @@ function readLocalDatabase() {
     return {
       users: Array.isArray(parsed.users) ? parsed.users : [],
       applications: Array.isArray(parsed.applications) ? parsed.applications : [],
+      documents: Array.isArray(parsed.documents) ? parsed.documents : [],
+      payments: Array.isArray(parsed.payments) ? parsed.payments : [],
       verifications: Array.isArray(parsed.verifications) ? parsed.verifications : [],
     };
   } catch (error) {
@@ -194,6 +320,8 @@ function persistLocalState() {
       {
         users: [...demoUsersByUid.values()],
         applications: [...demoApplications.values()],
+        documents: [...demoDocuments.values()],
+        payments: [...demoPayments.values()],
         verifications: [...verificationRecords.values()],
       },
       null,
@@ -201,6 +329,26 @@ function persistLocalState() {
     ),
     'utf8'
   );
+}
+
+function indexDemoDocument(document) {
+  if (!document || !document.id) return;
+  const ownerUid = normalizeValue(document.ownerUid);
+  if (ownerUid) {
+    const bucket = demoDocumentsByUser.get(ownerUid) || new Map();
+    bucket.set(document.id, document);
+    demoDocumentsByUser.set(ownerUid, bucket);
+  }
+}
+
+function indexDemoPayment(payment) {
+  if (!payment || !payment.id) return;
+  const ownerUid = normalizeValue(payment.ownerUid);
+  if (ownerUid) {
+    const bucket = demoPaymentsByUser.get(ownerUid) || new Map();
+    bucket.set(payment.id, payment);
+    demoPaymentsByUser.set(ownerUid, bucket);
+  }
 }
 
 function loadLocalState() {
@@ -214,6 +362,10 @@ function loadLocalState() {
   demoUsersByUsername.clear();
   demoUsersByEmail.clear();
   demoApplications.clear();
+  demoDocuments.clear();
+  demoDocumentsByUser.clear();
+  demoPayments.clear();
+  demoPaymentsByUser.clear();
   verificationRecords.clear();
 
   stored.users.forEach(user => {
@@ -238,6 +390,20 @@ function loadLocalState() {
   stored.applications.forEach(application => {
     if (application && application.id) {
       demoApplications.set(application.id, application);
+    }
+  });
+
+  stored.documents.forEach(document => {
+    if (document && document.id) {
+      demoDocuments.set(document.id, document);
+      indexDemoDocument(document);
+    }
+  });
+
+  stored.payments.forEach(payment => {
+    if (payment && payment.id) {
+      demoPayments.set(payment.id, payment);
+      indexDemoPayment(payment);
     }
   });
 
@@ -861,6 +1027,378 @@ function getVerificationStatus(record) {
   return 'sent';
 }
 
+function getAllowedDocumentExtension(filename) {
+  const clean = normalizeValue(filename);
+  if (!clean) return '';
+  const ext = path.extname(clean).toLowerCase();
+  return ALLOWED_DOCUMENT_EXTENSIONS.has(ext) ? ext : '';
+}
+
+function getStorageDocumentPath(id, ext) {
+  const cleanExt = String(ext || '').toLowerCase();
+  if (!cleanExt.startsWith('.')) {
+    return '';
+  }
+  ensureUploadDirectory();
+  return path.join(DOCUMENT_UPLOAD_DIR, `${id}${cleanExt}`);
+}
+
+function documentToMeta(document) {
+  if (!document) return null;
+  return {
+    id: document.id,
+    ownerUid: document.ownerUid || '',
+    ownerName: document.ownerName || '',
+    ownerEmail: document.ownerEmail || '',
+    applicationId: document.applicationId || '',
+    documentType: document.documentType || 'Other supporting document',
+    displayName: document.displayName || '',
+    originalName: document.originalName || '',
+    extension: document.extension || '',
+    mimeType: document.mimeType || '',
+    sizeBytes: Number(document.sizeBytes) || 0,
+    storageKind: document.storageKind || 'local_disk',
+    storageKey: document.storageKey || '',
+    notes: document.notes || '',
+    status: document.status || 'pending',
+    reviewerName: document.reviewerName || '',
+    reviewerEmail: document.reviewerEmail || '',
+    reviewerNote: document.reviewerNote || '',
+    reviewedAtMs: Number(document.reviewedAtMs) || null,
+    createdAtMs: Number(document.createdAtMs) || 0,
+    updatedAtMs: Number(document.updatedAtMs) || 0,
+  };
+}
+
+async function createDocumentRecord(documentData, fileBuffer) {
+  const now = Date.now();
+  const id = crypto.randomBytes(12).toString('hex');
+  const ext = getAllowedDocumentExtension(documentData.originalName);
+  if (!ext) {
+    throw new Error('Document type is not allowed.');
+  }
+  const displayName = normalizeValue(documentData.displayName) || path.basename(documentData.originalName || '');
+  const baseRecord = {
+    id,
+    ownerUid: normalizeValue(documentData.ownerUid),
+    ownerName: normalizeValue(documentData.ownerName),
+    ownerEmail: normalizeValue(documentData.ownerEmail),
+    applicationId: normalizeValue(documentData.applicationId),
+    documentType: REQUIRED_DOCUMENT_TYPES.includes(documentData.documentType)
+      ? documentData.documentType
+      : 'Other supporting document',
+    displayName,
+    originalName: normalizeValue(documentData.originalName) || displayName,
+    extension: ext,
+    mimeType: normalizeValue(documentData.mimeType),
+    sizeBytes: Number(documentData.sizeBytes) || 0,
+    notes: normalizeValue(documentData.notes),
+    status: 'pending',
+    reviewerName: '',
+    reviewerEmail: '',
+    reviewerNote: '',
+    reviewedAtMs: null,
+    createdAtMs: now,
+    updatedAtMs: now,
+  };
+
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const storageKind = 'firestore_base64';
+    const storageKey = `projects/${firestore.app.options.projectId}/databases/(default)/documents/${DOCUMENT_COLLECTION}/${id}`;
+    const record = {
+      ...baseRecord,
+      storageKind,
+      storageKey,
+      payloadBase64: fileBuffer ? fileBuffer.toString('base64') : '',
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await firestore.collection(DOCUMENT_COLLECTION).doc(id).set(record);
+    return documentToMeta(record);
+  }
+
+  const storageKind = 'local_disk';
+  const diskPath = getStorageDocumentPath(id, ext);
+  if (Buffer.isBuffer(fileBuffer) && fileBuffer.length > 0) {
+    fs.writeFileSync(diskPath, fileBuffer);
+  }
+  const record = {
+    ...baseRecord,
+    storageKind,
+    storageKey: diskPath,
+  };
+  demoDocuments.set(id, record);
+  indexDemoDocument(record);
+  persistLocalState();
+  return documentToMeta(record);
+}
+
+async function listAllDocuments() {
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection(DOCUMENT_COLLECTION).get();
+    return snapshot.docs
+      .map(doc => documentToMeta({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0));
+  }
+  return [...demoDocuments.values()]
+    .map(documentToMeta)
+    .sort((a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0));
+}
+
+async function listDocumentsForUser(user) {
+  const uid = normalizeValue(user && user.uid);
+  const email = normalizeValue(user && user.email).toLowerCase();
+  const allDocuments = await listAllDocuments();
+  return allDocuments.filter(document => {
+    const ownerUid = normalizeValue(document.ownerUid);
+    const ownerEmail = normalizeValue(document.ownerEmail).toLowerCase();
+    if (uid && ownerUid && ownerUid === uid) return true;
+    if (email && ownerEmail && ownerEmail === email) return true;
+    return false;
+  });
+}
+
+async function getDocumentById(id) {
+  if (!id) return null;
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection(DOCUMENT_COLLECTION).doc(id).get();
+    if (!snapshot.exists) return null;
+    return documentToMeta({ id: snapshot.id, ...snapshot.data() });
+  }
+  const stored = demoDocuments.get(id);
+  return stored ? documentToMeta(stored) : null;
+}
+
+async function getDocumentRawContent(document) {
+  if (!document) return null;
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection(DOCUMENT_COLLECTION).doc(document.id).get();
+    if (!snapshot.exists) return null;
+    const payload = snapshot.data() || {};
+    const base64 = normalizeValue(payload.payloadBase64);
+    if (!base64) return null;
+    return Buffer.from(base64, 'base64');
+  }
+  const storageKey = normalizeValue(document.storageKey);
+  if (!storageKey || !fs.existsSync(storageKey)) return null;
+  return fs.readFileSync(storageKey);
+}
+
+async function reviewDocument(id, status, reviewer, note) {
+  const cleanStatus = normalizeValue(status);
+  if (!['approved', 'rejected', 'in_review', 'pending'].includes(cleanStatus)) {
+    throw new Error('Invalid document review status.');
+  }
+  const cleanNote = normalizeValue(note);
+  const reviewedAtMs = Date.now();
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const docRef = firestore.collection(DOCUMENT_COLLECTION).doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) {
+      throw new Error('Document not found.');
+    }
+    await docRef.set(
+      {
+        status: cleanStatus,
+        reviewerName: reviewer.name || reviewer.username || reviewer.email,
+        reviewerEmail: reviewer.email || '',
+        reviewerNote: cleanNote,
+        reviewedAtMs,
+        updatedAtMs: reviewedAtMs,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return getDocumentById(id);
+  }
+  const stored = demoDocuments.get(id);
+  if (!stored) {
+    throw new Error('Document not found.');
+  }
+  stored.status = cleanStatus;
+  stored.reviewerName = reviewer.name || reviewer.username || reviewer.email;
+  stored.reviewerEmail = reviewer.email || '';
+  stored.reviewerNote = cleanNote;
+  stored.reviewedAtMs = reviewedAtMs;
+  stored.updatedAtMs = reviewedAtMs;
+  demoDocuments.set(id, stored);
+  indexDemoDocument(stored);
+  persistLocalState();
+  return documentToMeta(stored);
+}
+
+async function getDocumentApprovalStatusForUser(user) {
+  const documents = await listDocumentsForUser(user);
+  if (!documents.length) {
+    return {
+      hasDocuments: false,
+      total: 0,
+      approved: 0,
+      rejected: 0,
+      inReview: 0,
+      pending: 0,
+      paymentUnlocked: false,
+      summary: 'No documents uploaded yet.',
+      documents,
+    };
+  }
+  const counts = documents.reduce(
+    (acc, document) => {
+      acc.total += 1;
+      if (document.status === 'approved') acc.approved += 1;
+      else if (document.status === 'rejected') acc.rejected += 1;
+      else if (document.status === 'in_review') acc.inReview += 1;
+      else acc.pending += 1;
+      return acc;
+    },
+    { total: 0, approved: 0, rejected: 0, inReview: 0, pending: 0 }
+  );
+  const paymentUnlocked = counts.approved > 0 && counts.pending === 0 && counts.inReview === 0;
+  let summary;
+  if (counts.rejected > 0) {
+    summary = `${counts.rejected} document(s) were rejected. Upload corrected files and wait for admin approval.`;
+  } else if (counts.inReview > 0 || counts.pending > 0) {
+    summary = `Document review in progress. Payment will unlock once admin approves all submitted files.`;
+  } else if (counts.approved === counts.total && counts.total > 0) {
+    summary = 'All uploaded documents are approved. You may now proceed to payment.';
+  } else {
+    summary = 'Document review in progress.';
+  }
+  return {
+    hasDocuments: true,
+    ...counts,
+    paymentUnlocked,
+    summary,
+    documents,
+  };
+}
+
+async function createPaymentRecord(paymentData) {
+  const now = Date.now();
+  const id = crypto.randomBytes(12).toString('hex');
+  const method = PAYMENT_METHODS.some(item => item.id === paymentData.method)
+    ? paymentData.method
+    : 'bank';
+  const baseRecord = {
+    id,
+    ownerUid: normalizeValue(paymentData.ownerUid),
+    ownerName: normalizeValue(paymentData.ownerName),
+    ownerEmail: normalizeValue(paymentData.ownerEmail),
+    method,
+    amountCents: APPLICATION_FEE_CENTS,
+    label: APPLICATION_FEE_LABEL,
+    reference: normalizeValue(paymentData.reference) || `PAY-${id.toUpperCase().slice(0, 8)}`,
+    notes: normalizeValue(paymentData.notes),
+    proofDocumentId: normalizeValue(paymentData.proofDocumentId),
+    status: method === 'bank' ? 'in_review' : 'paid',
+    reviewerName: method === 'card' ? 'Stripe (demo)' : '',
+    reviewerEmail: '',
+    reviewerNote: method === 'card' ? 'Payment confirmed in card demo mode.' : '',
+    reviewedAtMs: method === 'card' ? now : null,
+    createdAtMs: now,
+    updatedAtMs: now,
+  };
+
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const record = {
+      ...baseRecord,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+    await firestore.collection(PAYMENT_COLLECTION).doc(id).set(record);
+    return record;
+  }
+  demoPayments.set(id, baseRecord);
+  indexDemoPayment(baseRecord);
+  persistLocalState();
+  return baseRecord;
+}
+
+async function listAllPayments() {
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection(PAYMENT_COLLECTION).get();
+    return snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .sort((a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0));
+  }
+  return [...demoPayments.values()].sort(
+    (a, b) => (b.updatedAtMs || b.createdAtMs || 0) - (a.updatedAtMs || a.createdAtMs || 0)
+  );
+}
+
+async function listPaymentsForUser(user) {
+  const uid = normalizeValue(user && user.uid);
+  const email = normalizeValue(user && user.email).toLowerCase();
+  const allPayments = await listAllPayments();
+  return allPayments.filter(payment => {
+    const ownerUid = normalizeValue(payment.ownerUid);
+    const ownerEmail = normalizeValue(payment.ownerEmail).toLowerCase();
+    if (uid && ownerUid && ownerUid === uid) return true;
+    if (email && ownerEmail && ownerEmail === email) return true;
+    return false;
+  });
+}
+
+async function getPaymentById(id) {
+  if (!id) return null;
+  if (isFirebaseConfigured()) {
+    const snapshot = await ensureFirebaseReady().collection(PAYMENT_COLLECTION).doc(id).get();
+    if (!snapshot.exists) return null;
+    return { id: snapshot.id, ...snapshot.data() };
+  }
+  return demoPayments.get(id) || null;
+}
+
+async function reviewPayment(id, status, reviewer, note) {
+  const cleanStatus = normalizeValue(status);
+  if (!['paid', 'rejected', 'in_review', 'pending'].includes(cleanStatus)) {
+    throw new Error('Invalid payment review status.');
+  }
+  const cleanNote = normalizeValue(note);
+  const reviewedAtMs = Date.now();
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const docRef = firestore.collection(PAYMENT_COLLECTION).doc(id);
+    const snapshot = await docRef.get();
+    if (!snapshot.exists) throw new Error('Payment not found.');
+    await docRef.set(
+      {
+        status: cleanStatus,
+        reviewerName: reviewer.name || reviewer.username || reviewer.email,
+        reviewerEmail: reviewer.email || '',
+        reviewerNote: cleanNote,
+        reviewedAtMs,
+        updatedAtMs: reviewedAtMs,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return getPaymentById(id);
+  }
+  const stored = demoPayments.get(id);
+  if (!stored) throw new Error('Payment not found.');
+  stored.status = cleanStatus;
+  stored.reviewerName = reviewer.name || reviewer.username || reviewer.email;
+  stored.reviewerEmail = reviewer.email || '';
+  stored.reviewerNote = cleanNote;
+  stored.reviewedAtMs = reviewedAtMs;
+  stored.updatedAtMs = reviewedAtMs;
+  demoPayments.set(id, stored);
+  indexDemoPayment(stored);
+  persistLocalState();
+  return stored;
+}
+
+function humanizeBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+}
+
 function isAuthenticated(req, res, next) {
   const user = getCookieUser(req) || getCookieUser(req, ADMIN_COOKIE_NAME);
 
@@ -1223,7 +1761,7 @@ app.post('/admin/login', async (req, res) => {
   }
 });
 
-app.get('/dashboard', isAuthenticated, (req, res) => {
+app.get('/dashboard', isAuthenticated, async (req, res) => {
   const initials = (req.user.name || req.user.username || 'U')
     .split(' ')
     .map(s => s.charAt(0).toUpperCase())
@@ -1243,6 +1781,95 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
             <div class="arrow">→</div>
           </a>
       `
+    : '';
+
+  const approval = await getDocumentApprovalStatusForUser(req.user);
+  const documents = approval.documents || [];
+  const payments = await listPaymentsForUser(req.user);
+  const success = normalizeValue(req.query.success);
+  const error = normalizeValue(req.query.error);
+  const flash = success
+    ? `<div class="flash flash-success">${escapeHtml(success)}</div>`
+    : error
+      ? `<div class="flash flash-error">${escapeHtml(error)}</div>`
+      : '';
+  const paymentOptionsCard = approval.paymentUnlocked
+    ? `
+        <a href="/payments" class="action-card">
+          <div class="icon">💳</div>
+          <h3>Proceed to Payment</h3>
+          <p>Documents approved. Choose your preferred payment option to finalise the application fee.</p>
+          <div class="arrow">→</div>
+        </a>
+      `
+    : `
+        <div class="action-card action-card-muted" aria-disabled="true">
+          <div class="icon">🔒</div>
+          <h3>Payment Locked</h3>
+          <p>${escapeHtml(approval.summary)}</p>
+          <div class="arrow">🔒</div>
+        </div>
+      `;
+
+  const documentTypeOptions = REQUIRED_DOCUMENT_TYPES
+    .map(type => `<option value="${escapeHtml(type)}">${escapeHtml(type)}</option>`)
+    .join('');
+
+  const documentsMarkup = documents.length
+    ? documents.map(document => {
+        const badge = getDocumentStatusBadge(document.status);
+        const reviewerNote = normalizeValue(document.reviewerNote);
+        return `
+          <article class="doc-card">
+            <div class="doc-head">
+              <div>
+                <div class="doc-type">${escapeHtml(document.documentType)}</div>
+                <h4>${escapeHtml(document.displayName || document.originalName || 'Uploaded document')}</h4>
+                <p class="doc-meta">
+                  ${escapeHtml(document.originalName || '')}
+                  ${document.sizeBytes ? `· ${humanizeBytes(document.sizeBytes)}` : ''}
+                  · ${escapeHtml(formatDateTime(document.createdAtMs || document.updatedAtMs))}
+                </p>
+              </div>
+              <span class="doc-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+            </div>
+            <div class="doc-body">
+              <p class="doc-notes">${escapeHtml(normalizeValue(document.notes) || 'No applicant note provided.')}</p>
+              ${reviewerNote ? `<p class="doc-reviewer"><strong>Admin note:</strong> ${escapeHtml(reviewerNote)} <span class="doc-meta">· ${escapeHtml(formatDateTime(document.reviewedAtMs || document.updatedAtMs))}</span></p>` : ''}
+              <div class="doc-actions">
+                <a href="/documents/${encodeURIComponent(document.id)}/download" class="link-btn">Download</a>
+              </div>
+            </div>
+          </article>
+        `;
+      }).join('')
+    : `<div class="empty-state"><h4>No documents uploaded yet</h4><p>Use the form below to upload each required document. The admin team will review them before payment is unlocked.</p></div>`;
+
+  const paymentsMarkup = payments.length
+    ? payments.map(payment => {
+        const badge = getPaymentStatusBadge(payment.status);
+        const methodMeta = PAYMENT_METHODS.find(item => item.id === payment.method) || { label: normalizeValue(payment.method) || 'Payment' };
+        return `
+          <article class="payment-card">
+            <div class="doc-head">
+              <div>
+                <div class="doc-type">${escapeHtml(methodMeta.label)}</div>
+                <h4>${escapeHtml(payment.label)}</h4>
+                <p class="doc-meta">
+                  Reference <strong>${escapeHtml(payment.reference)}</strong>
+                  · ${escapeHtml(formatCurrencyCents(payment.amountCents))}
+                  · ${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}
+                </p>
+              </div>
+              <span class="doc-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+            </div>
+            <div class="doc-body">
+              ${normalizeValue(payment.notes) ? `<p class="doc-notes"><strong>Notes:</strong> ${escapeHtml(payment.notes)}</p>` : ''}
+              ${normalizeValue(payment.reviewerNote) ? `<p class="doc-reviewer"><strong>Admin note:</strong> ${escapeHtml(payment.reviewerNote)} <span class="doc-meta">· ${escapeHtml(formatDateTime(payment.reviewedAtMs || payment.updatedAtMs))}</span></p>` : ''}
+            </div>
+          </article>
+        `;
+      }).join('')
     : '';
 
   res.send(`
@@ -1268,6 +1895,10 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
           --card:#ffffff;
           --shadow:0 2px 8px rgba(0,0,0,.06);
           --shadow-hover:0 6px 20px rgba(227,82,5,.12);
+          --green:#16a34a;
+          --red:#dc2626;
+          --amber:#b45309;
+          --blue:#2563eb;
         }
         *{box-sizing:border-box}
         body{
@@ -1292,12 +1923,14 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
           display:flex;
           justify-content:space-between;
           align-items:center;
+          gap:16px;
         }
         .brand{
           display:flex;
           align-items:center;
           gap:14px;
           color:#fff;
+          min-width:0;
         }
         .brand-mark{
           width:36px;height:36px;border-radius:8px;
@@ -1305,6 +1938,7 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
           display:grid;place-items:center;
           color:#fff;font-weight:800;font-size:16px;
           letter-spacing:-.02em;
+          flex:none;
         }
         .brand-text .title{
           font-size:16px;font-weight:700;letter-spacing:-.01em;
@@ -1312,6 +1946,14 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
         .brand-text .sub{
           font-size:10px;color:#bdbdbd;margin-top:2px;letter-spacing:.02em;
         }
+        .menu-toggle{
+          display:none;
+          width:44px;height:44px;border-radius:10px;
+          border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);
+          color:#fff;align-items:center;justify-content:center;cursor:pointer;padding:0;
+        }
+        .menu-lines{display:grid;gap:5px}
+        .menu-lines span{display:block;width:18px;height:2px;border-radius:999px;background:rgba(255,255,255,.9)}
         nav.topnav{
           display:flex;align-items:center;gap:4px;
         }
@@ -1343,6 +1985,9 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
         .page-head .crumbs{
           font-size:12px;color:var(--muted);
         }
+        .flash{padding:14px 16px;border-radius:14px;font-weight:600;margin-bottom:22px;border:1px solid transparent}
+        .flash-success{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+        .flash-error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
         .welcome-card{
           background:linear-gradient(135deg,var(--orange) 0%,#f26b22 100%);
           color:#fff;border-radius:16px;padding:28px 32px;
@@ -1397,6 +2042,28 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
           content:"";width:8px;height:8px;border-radius:50%;
           background:#4ade80;box-shadow:0 0 0 3px rgba(74,222,128,.25);
         }
+        .approval-card{
+          background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 24px;
+          box-shadow:var(--shadow);margin-bottom:28px;
+        }
+        .approval-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:14px}
+        .approval-head h2{margin:0;font-size:20px;font-weight:600;letter-spacing:-.02em}
+        .approval-summary{margin:0;color:var(--muted);line-height:1.6}
+        .approval-pill{
+          display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;
+          font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;
+          border:1px solid transparent;
+        }
+        .approval-pill.locked{background:#fff7ed;color:#9a3412;border-color:#fed7aa}
+        .approval-pill.unlocked{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+        .approval-counts{
+          display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:18px;
+        }
+        .approval-count{
+          border:1px solid var(--line);background:#fafafa;border-radius:14px;padding:14px;
+        }
+        .approval-count strong{display:block;font-size:22px;font-weight:700}
+        .approval-count span{color:var(--muted);font-size:12px}
         .grid-cards{
           display:grid;gap:20px;
           grid-template-columns:repeat(3,1fr);
@@ -1437,19 +2104,105 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
         .action-card:hover .arrow{
           background:var(--orange);color:#fff;transform:translateX(2px);
         }
+        .action-card-muted{
+          opacity:.82;
+          cursor:not-allowed;
+        }
+        .action-card-muted .icon{
+          background:#f1f5f9;color:#475569;
+        }
+        .action-card-muted .arrow{
+          background:#f1f5f9;color:#475569;
+        }
+        .section-title{
+          display:flex;align-items:center;justify-content:space-between;gap:16px;margin:32px 0 16px;flex-wrap:wrap;
+        }
+        .section-title h2{margin:0;font-size:20px;font-weight:600;letter-spacing:-.02em}
+        .section-title .hint{color:var(--muted);font-size:13px}
+        .upload-card,.docs-card,.payments-card{
+          background:var(--card);border:1px solid var(--line);border-radius:16px;padding:22px 24px;
+          box-shadow:var(--shadow);margin-bottom:22px;
+        }
+        .upload-card form{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;align-items:end}
+        .upload-card label{display:grid;gap:6px;font-size:13px;font-weight:600;color:#1f2937}
+        .upload-card input,.upload-card select,.upload-card textarea{
+          width:100%;border-radius:12px;border:1px solid var(--border);background:#fff;color:var(--text);padding:12px 14px;font:inherit;
+        }
+        .upload-card input[type="file"]{padding:10px 12px;background:#fafafa}
+        .upload-card input:focus,.upload-card select:focus,.upload-card textarea:focus{
+          outline:none;border-color:var(--orange);box-shadow:0 0 0 3px rgba(227,82,5,.12)
+        }
+        .span-12{grid-column:span 12 / span 12}
+        .span-6{grid-column:span 6 / span 6}
+        .span-4{grid-column:span 4 / span 4}
+        .upload-card .hint{margin:0;font-size:12px;color:var(--muted);line-height:1.6}
+        .btn{
+          display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;border-radius:12px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer;color:#fff;background:var(--orange);transition:background .15s,transform .15s;
+        }
+        .btn:hover{background:var(--orange-dark)}
+        .btn:active{transform:translateY(1px)}
+        .btn-block{width:100%}
+        .btn-secondary{background:#0f172a;color:#fff}
+        .btn-secondary:hover{background:#111827}
+        .doc-list,.payment-list{display:grid;gap:14px}
+        .doc-card,.payment-card{
+          border:1px solid var(--line);background:#fcfcfc;border-radius:14px;padding:16px 18px;
+        }
+        .doc-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+        .doc-type{
+          font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:6px;
+        }
+        .doc-card h4,.payment-card h4{margin:0 0 6px;font-size:16px;font-weight:600}
+        .doc-meta{color:var(--muted);font-size:12px;margin:0}
+        .doc-pill{
+          display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:700;text-transform:capitalize;border:1px solid transparent;
+        }
+        .status-pending{background:#fffbeb;color:#92400e;border-color:#fde68a}
+        .status-in_review{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+        .status-approved{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+        .status-rejected{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+        .doc-body{margin-top:12px;display:grid;gap:8px}
+        .doc-notes{margin:0;color:#334155;line-height:1.6;font-size:13px}
+        .doc-reviewer{margin:0;color:#0f172a;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px}
+        .doc-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+        .link-btn{
+          display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--orange);text-decoration:none;font-size:13px;
+        }
+        .link-btn:hover{text-decoration:underline}
+        .empty-state{
+          border:1px dashed var(--border);background:#fff;border-radius:14px;padding:22px;text-align:center;color:var(--muted)
+        }
+        .empty-state h4{margin:0 0 6px;color:#0f172a}
         @media (max-width:960px){
           .grid-cards{grid-template-columns:repeat(2,1fr)}
           .welcome-card{grid-template-columns:auto 1fr}
           .welcome-card .status-pill{grid-column:1/-1;justify-self:start}
+          .approval-counts{grid-template-columns:repeat(2,minmax(0,1fr))}
+          .upload-card form{grid-template-columns:repeat(6,minmax(0,1fr))}
+          .span-4{grid-column:span 3 / span 3}
+          .span-6{grid-column:span 6 / span 6}
         }
-        @media (max-width:640px){
+        @media (max-width:720px){
           .topbar-inner{padding:0 16px}
-          nav.topnav{display:none}
+          .brand-text .title{font-size:14px}
+          .brand-text .sub{font-size:9px}
+          .menu-toggle{display:inline-flex}
+          nav.topnav{
+            display:none;position:absolute;top:64px;left:0;right:0;background:#0b0b0b;
+            border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;flex-direction:column;align-items:stretch;gap:4px;
+            z-index:30;
+          }
+          nav.topnav.is-open{display:flex}
+          nav.topnav a{padding:12px 14px;border-radius:10px}
+          nav.topnav a.logout{margin-left:0}
           .page{padding:22px 16px 40px}
-          .welcome-card{padding:22px;border-radius:14px;gap:16px}
+          .welcome-card{padding:22px;border-radius:14px;gap:16px;grid-template-columns:auto 1fr}
           .avatar{width:64px;height:64px;font-size:22px}
           .welcome-info .hello{font-size:20px}
           .grid-cards{grid-template-columns:1fr}
+          .approval-counts{grid-template-columns:repeat(2,minmax(0,1fr))}
+          .upload-card form{grid-template-columns:1fr}
+          .span-12,.span-6,.span-4{grid-column:span 1 / span 1}
         }
       </style>
     </head>
@@ -1463,11 +2216,16 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
               <div class="sub">TE PAPA KAWANA KIWI</div>
             </div>
           </div>
-          <nav class="topnav">
+          <button class="menu-toggle" id="topnav-toggle" type="button" aria-label="Toggle navigation" aria-controls="topnav" aria-expanded="false">
+            <span class="menu-lines" aria-hidden="true"><span></span><span></span><span></span></span>
+          </button>
+          <nav class="topnav" id="topnav">
             <a href="/">Home</a>
             <a href="/visas">Visas</a>
             <a href="/apply">Apply</a>
             <a href="/dashboard" class="active">Dashboard</a>
+            <a href="/documents">Documents</a>
+            <a href="/payments">Payments</a>
             ${adminNav}
             <a href="/logout" class="logout">Logout</a>
           </nav>
@@ -1482,6 +2240,8 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
           </div>
         </div>
 
+        ${flash}
+
         <section class="welcome-card">
           <div class="avatar">${initials}</div>
           <div class="welcome-info">
@@ -1492,14 +2252,25 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
           <span class="status-pill">Account Active</span>
         </section>
 
-        <section class="grid-cards">
-          <a href="/visas" class="action-card">
-            <div class="icon">📋</div>
-            <h3>Browse Visas</h3>
-            <p>Explore visa options, eligibility criteria, and find the right pathway for your situation.</p>
-            <div class="arrow">→</div>
-          </a>
+        <section class="approval-card" aria-labelledby="approval-heading">
+          <div class="approval-head">
+            <div>
+              <h2 id="approval-heading">Document review status</h2>
+              <p class="approval-summary">${escapeHtml(approval.summary)}</p>
+            </div>
+            ${approval.paymentUnlocked
+              ? '<span class="approval-pill unlocked">Approved · Payment unlocked</span>'
+              : '<span class="approval-pill locked">Waiting for admin approval</span>'}
+          </div>
+          <div class="approval-counts">
+            <div class="approval-count"><strong>${approval.total}</strong><span>Total submitted</span></div>
+            <div class="approval-count"><strong>${approval.approved}</strong><span>Approved</span></div>
+            <div class="approval-count"><strong>${approval.inReview + approval.pending}</strong><span>Awaiting review</span></div>
+            <div class="approval-count"><strong>${approval.rejected}</strong><span>Rejected</span></div>
+          </div>
+        </section>
 
+        <section class="grid-cards">
           <a href="/apply" class="action-card">
             <div class="icon">📝</div>
             <h3>Start Application</h3>
@@ -1507,18 +2278,550 @@ app.get('/dashboard', isAuthenticated, (req, res) => {
             <div class="arrow">→</div>
           </a>
 
-          <a href="/logout" class="action-card">
-            <div class="icon">🚪</div>
-            <h3>Sign Out Securely</h3>
-            <p>End your session and protect your account information when using shared devices.</p>
+          <a href="/documents" class="action-card">
+            <div class="icon">📂</div>
+            <h3>Required Documents</h3>
+            <p>Upload passport, identity, medical, police, financial, and other required files for review.</p>
             <div class="arrow">→</div>
           </a>
+
+          ${paymentOptionsCard}
+
           ${adminCard}
         </section>
+
+        <div class="section-title">
+          <h2>Upload a required document</h2>
+          <span class="hint">Max file size: ${humanizeBytes(MAX_DOCUMENT_SIZE_BYTES)}. Allowed types: PDF, image, Word, Excel, text.</span>
+        </div>
+
+        <section class="upload-card" aria-labelledby="upload-heading">
+          <h3 id="upload-heading" style="margin:0 0 12px;font-size:16px">Submit document for admin review</h3>
+          <form method="POST" action="/documents/upload" enctype="multipart/form-data">
+            <label class="span-4">
+              Document type
+              <select name="documentType" required>
+                ${documentTypeOptions}
+              </select>
+            </label>
+            <label class="span-4">
+              File name (shown to admin)
+              <input type="text" name="displayName" placeholder="e.g. Passport biodata page">
+            </label>
+            <label class="span-4">
+              File
+              <input type="file" name="file" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx,.xls,.xlsx,.txt,.rtf" required>
+            </label>
+            <label class="span-12">
+              Notes for the admin team
+              <textarea name="notes" rows="3" placeholder="Add context, dates, or reference details that help the reviewer."></textarea>
+            </label>
+            <div class="span-12" style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+              <p class="hint">After upload your document will be marked <strong>Awaiting review</strong>. The admin team can approve or reject it from the Admin Control Centre.</p>
+              <button type="submit" class="btn">Upload document</button>
+            </div>
+          </form>
+        </section>
+
+        <div class="section-title">
+          <h2>Your uploaded documents</h2>
+          <span class="hint">Download links, reviewer notes, and status badges are shown here.</span>
+        </div>
+        <section class="docs-card">
+          <div class="doc-list">${documentsMarkup}</div>
+        </section>
+
+        ${paymentsMarkup ? `
+          <div class="section-title">
+            <h2>Payment history</h2>
+            <span class="hint">Previous payment requests and their current status.</span>
+          </div>
+          <section class="payments-card">
+            <div class="payment-list">${paymentsMarkup}</div>
+          </section>
+        ` : ''}
       </main>
+      <script>
+        (function () {
+          var toggle = document.getElementById('topnav-toggle');
+          var nav = document.getElementById('topnav');
+          if (!toggle || !nav) return;
+          toggle.addEventListener('click', function () {
+            var open = nav.classList.toggle('is-open');
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          });
+          nav.addEventListener('click', function (event) {
+            var anchor = event.target && event.target.closest && event.target.closest('a');
+            if (anchor) {
+              nav.classList.remove('is-open');
+              toggle.setAttribute('aria-expanded', 'false');
+            }
+          });
+          window.addEventListener('resize', function () {
+            if (window.innerWidth > 720) {
+              nav.classList.remove('is-open');
+              toggle.setAttribute('aria-expanded', 'false');
+            }
+          });
+        })();
+      </script>
     </body>
     </html>
   `);
+});
+
+app.get('/documents', isAuthenticated, async (req, res) => {
+  res.redirect(buildRedirect('/dashboard', { success: 'Manage your documents from your dashboard.' }));
+});
+
+app.get('/documents/:id/download', isAuthenticated, async (req, res) => {
+  const id = normalizeValue(req.params.id);
+  try {
+    const document = await getDocumentById(id);
+    if (!document) {
+      return res.status(404).send('Document not found.');
+    }
+    const ownerUid = normalizeValue(document.ownerUid);
+    const ownerEmail = normalizeValue(document.ownerEmail).toLowerCase();
+    const actorUid = normalizeValue(req.user && req.user.uid);
+    const actorEmail = normalizeValue(req.user && req.user.email).toLowerCase();
+    const isOwner = (actorUid && ownerUid && actorUid === ownerUid) || (actorEmail && ownerEmail && actorEmail === ownerEmail);
+    if (!isOwner && !isAdminUser(req.user)) {
+      return res.status(403).send('You are not allowed to download this document.');
+    }
+    const buffer = await getDocumentRawContent(document);
+    if (!buffer) {
+      return res.status(404).send('Document file is missing.');
+    }
+    const ext = getAllowedDocumentExtension(document.originalName || document.displayName || (document.extension ? `file${document.extension}` : '')) || document.extension || '.bin';
+    const downloadName = normalizeValue(document.displayName) || normalizeValue(document.originalName) || `document-${document.id}`;
+    const safeName = /\.[a-z0-9]+$/i.test(downloadName) ? downloadName : `${downloadName}${ext}`;
+    const mimeType = normalizeValue(document.mimeType) || (ext === '.pdf' ? 'application/pdf' : 'application/octet-stream');
+    res.setHeader('Content-Type', mimeType);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName.replace(/["\\]/g, '_')}"`);
+    res.setHeader('Content-Length', buffer.length);
+    return res.send(buffer);
+  } catch (error) {
+    return res.status(500).send(`Unable to download document: ${escapeHtml(error.message)}`);
+  }
+});
+
+app.post('/documents/upload', isAuthenticated, handleDocumentUpload, async (req, res, next) => {
+  try {
+    const documentType = normalizeValue(req.body && req.body.documentType);
+    const displayName = normalizeValue(req.body && req.body.displayName);
+    const notes = normalizeValue(req.body && req.body.notes);
+    if (!REQUIRED_DOCUMENT_TYPES.includes(documentType)) {
+      return res.redirect(buildRedirect('/dashboard', { error: 'Please select a valid document type.' }));
+    }
+    const file = req.file;
+    if (!file || !file.buffer) {
+      return res.redirect(buildRedirect('/dashboard', { error: 'A document file is required.' }));
+    }
+    const ext = getAllowedDocumentExtension(file.originalname || (file.filename || ''));
+    if (!ext) {
+      return res.redirect(buildRedirect('/dashboard', { error: 'Document type is not allowed.' }));
+    }
+    if (file.size > MAX_DOCUMENT_SIZE_BYTES) {
+      return res.redirect(buildRedirect('/dashboard', { error: `Document is too large. Maximum size is ${humanizeBytes(MAX_DOCUMENT_SIZE_BYTES)}.` }));
+    }
+    await createDocumentRecord(
+      {
+        ownerUid: req.user.uid,
+        ownerName: req.user.name || req.user.username,
+        ownerEmail: req.user.email,
+        documentType,
+        displayName,
+        originalName: file.originalname || (file.filename || ''),
+        mimeType: file.mimetype || '',
+        sizeBytes: Number(file.size) || file.buffer.length,
+        notes,
+      },
+      file.buffer
+    );
+    return res.redirect(buildRedirect('/dashboard', { success: 'Document uploaded and sent to the admin team for review.' }));
+  } catch (error) {
+    return res.redirect(buildRedirect('/dashboard', { error: error.message || 'Document upload failed.' }));
+  }
+});
+
+app.use('/documents/upload', (error, req, res, next) => {
+  if (res.headersSent) return next(error);
+  const message = error && error.message ? error.message : 'Document upload failed.';
+  return res.redirect(buildRedirect('/dashboard', { error: message }));
+});
+
+app.get('/payments', isAuthenticated, async (req, res) => {
+  const approval = await getDocumentApprovalStatusForUser(req.user);
+  const payments = await listPaymentsForUser(req.user);
+  const success = normalizeValue(req.query.success);
+  const error = normalizeValue(req.query.error);
+  const flash = success
+    ? `<div class="flash flash-success">${escapeHtml(success)}</div>`
+    : error
+      ? `<div class="flash flash-error">${escapeHtml(error)}</div>`
+      : '';
+
+  if (!approval.paymentUnlocked) {
+    res.send(`
+      <!doctype html>
+      <html lang="en-NZ">
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <title>Payment Options - Immigration New Zealand</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <style>
+          :root{--orange:#e35205;--orange-dark:#cf4900;--bg:#f3f3f3;--text:#1f1f1f;--muted:#6f6f6f;--line:#d5d5d5;--card:#fff;--shadow:0 2px 8px rgba(0,0,0,.06)}
+          *{box-sizing:border-box}
+          body{margin:0;font-family:"Inter",Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+          .topbar{background:#000;height:64px;display:flex;align-items:center;border-bottom:3px solid var(--orange)}
+          .topbar-inner{width:100%;max-width:1280px;margin:0 auto;padding:0 28px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+          .brand{display:flex;align-items:center;gap:14px;color:#fff;min-width:0}
+          .brand-mark{width:36px;height:36px;border-radius:8px;background:var(--orange);display:grid;place-items:center;color:#fff;font-weight:800}
+          .brand-text .title{font-size:16px;font-weight:700}
+          .brand-text .sub{font-size:10px;color:#bdbdbd;margin-top:2px}
+          nav.topnav{display:flex;align-items:center;gap:4px}
+          nav.topnav a{color:#e8e8e8;text-decoration:none;font-size:13px;font-weight:500;padding:8px 14px;border-radius:6px}
+          nav.topnav a:hover{background:rgba(255,255,255,.08);color:#fff}
+          nav.topnav a.active{background:var(--orange);color:#fff}
+          .page{max-width:1080px;margin:0 auto;padding:40px 28px 60px}
+          .flash{padding:14px 16px;border-radius:14px;font-weight:600;margin-bottom:22px;border:1px solid transparent}
+          .flash-success{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+          .flash-error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+          .lock-card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:30px;box-shadow:var(--shadow)}
+          .lock-card h1{margin:0 0 10px;font-size:26px;font-weight:600;letter-spacing:-.02em}
+          .lock-card p{margin:0 0 22px;color:var(--muted);line-height:1.7}
+          .btn{display:inline-flex;align-items:center;gap:8px;border:none;border-radius:12px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer;color:#fff;background:var(--orange);text-decoration:none}
+          .btn:hover{background:var(--orange-dark)}
+          @media (max-width:640px){
+            .topbar-inner{padding:0 16px}
+            nav.topnav{display:none}
+            .page{padding:24px 16px 40px}
+          }
+        </style>
+      </head>
+      <body>
+        <header class="topbar">
+          <div class="topbar-inner">
+            <div class="brand">
+              <div class="brand-mark">INZ</div>
+              <div class="brand-text">
+                <div class="title">Immigration New Zealand</div>
+                <div class="sub">TE PAPA KAWANA KIWI</div>
+              </div>
+            </div>
+            <nav class="topnav">
+              <a href="/dashboard">Dashboard</a>
+              <a href="/payments" class="active">Payments</a>
+              <a href="/logout">Logout</a>
+            </nav>
+          </div>
+        </header>
+        <main class="page">
+          ${flash}
+          <section class="lock-card">
+            <h1>Payment options are locked until your documents are approved.</h1>
+            <p>${escapeHtml(approval.summary)}</p>
+            <a class="btn" href="/dashboard">Go back to Dashboard</a>
+          </section>
+        </main>
+      </body>
+      </html>
+    `);
+    return;
+  }
+
+  const proofDocumentId = normalizeValue(req.query.proofDocumentId);
+  const paymentMethodOptions = PAYMENT_METHODS
+    .map(method => `<option value="${escapeHtml(method.id)}">${escapeHtml(method.label)}</option>`)
+    .join('');
+  const paymentsMarkup = payments.length
+    ? payments.map(payment => {
+        const badge = getPaymentStatusBadge(payment.status);
+        const methodMeta = PAYMENT_METHODS.find(item => item.id === payment.method) || { label: normalizeValue(payment.method) || 'Payment' };
+        return `
+          <article class="doc-card">
+            <div class="doc-head">
+              <div>
+                <div class="doc-type">${escapeHtml(methodMeta.label)}</div>
+                <h4>${escapeHtml(payment.label)}</h4>
+                <p class="doc-meta">Reference <strong>${escapeHtml(payment.reference)}</strong> · ${escapeHtml(formatCurrencyCents(payment.amountCents))} · ${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}</p>
+              </div>
+              <span class="doc-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+            </div>
+            <div class="doc-body">
+              ${normalizeValue(payment.notes) ? `<p class="doc-notes"><strong>Notes:</strong> ${escapeHtml(payment.notes)}</p>` : ''}
+              ${normalizeValue(payment.reviewerNote) ? `<p class="doc-reviewer"><strong>Admin note:</strong> ${escapeHtml(payment.reviewerNote)} <span class="doc-meta">· ${escapeHtml(formatDateTime(payment.reviewedAtMs || payment.updatedAtMs))}</span></p>` : ''}
+            </div>
+          </article>
+        `;
+      }).join('')
+    : '<div class="empty-state"><h4>No payments yet</h4><p>Create your first payment request from the form below.</p></div>';
+
+  res.send(`
+    <!doctype html>
+    <html lang="en-NZ">
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <title>Payment Options - Immigration New Zealand</title>
+      <link rel="preconnect" href="https://fonts.googleapis.com">
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+      <style>
+        :root{
+          --orange:#e35205;
+          --orange-dark:#cf4900;
+          --bg:#f3f3f3;
+          --text:#1f1f1f;
+          --muted:#6f6f6f;
+          --border:#c9c9c9;
+          --line:#d5d5d5;
+          --card:#ffffff;
+          --shadow:0 2px 8px rgba(0,0,0,.06);
+        }
+        *{box-sizing:border-box}
+        body{margin:0;font-family:"Inter",Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+        .topbar{background:#000;height:64px;display:flex;align-items:center;border-bottom:3px solid var(--orange);position:relative}
+        .topbar-inner{width:100%;max-width:1280px;margin:0 auto;padding:0 28px;display:flex;justify-content:space-between;align-items:center;gap:16px}
+        .brand{display:flex;align-items:center;gap:14px;color:#fff;min-width:0}
+        .brand-mark{width:36px;height:36px;border-radius:8px;background:var(--orange);display:grid;place-items:center;color:#fff;font-weight:800}
+        .brand-text .title{font-size:16px;font-weight:700}
+        .brand-text .sub{font-size:10px;color:#bdbdbd;margin-top:2px}
+        .menu-toggle{
+          display:none;
+          width:44px;height:44px;border-radius:10px;
+          border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);
+          color:#fff;align-items:center;justify-content:center;cursor:pointer;padding:0;
+        }
+        .menu-lines{display:grid;gap:5px}
+        .menu-lines span{display:block;width:18px;height:2px;border-radius:999px;background:rgba(255,255,255,.9)}
+        nav.topnav{display:flex;align-items:center;gap:4px}
+        nav.topnav a{color:#e8e8e8;text-decoration:none;font-size:13px;font-weight:500;padding:8px 14px;border-radius:6px}
+        nav.topnav a:hover{background:rgba(255,255,255,.08);color:#fff}
+        nav.topnav a.active{background:var(--orange);color:#fff}
+        .page{max-width:1120px;margin:0 auto;padding:32px 28px 56px}
+        .flash{padding:14px 16px;border-radius:14px;font-weight:600;margin-bottom:22px;border:1px solid transparent}
+        .flash-success{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
+        .flash-error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+        .fee-card{
+          background:linear-gradient(135deg,var(--orange) 0%,#f26b22 100%);color:#fff;border-radius:18px;padding:24px;margin-bottom:22px;
+          display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;
+        }
+        .fee-card h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em}
+        .fee-card p{margin:6px 0 0;color:rgba(255,255,255,.86);line-height:1.6}
+        .fee-amount{font-size:34px;font-weight:800;letter-spacing:-.04em}
+        .methods{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin:20px 0 26px}
+        .method-card{
+          background:var(--card);border:1px solid var(--line);border-radius:16px;padding:18px 20px;box-shadow:var(--shadow);
+          display:grid;gap:6px;
+        }
+        .method-card h3{margin:0;font-size:16px;font-weight:700}
+        .method-card p{margin:0;color:var(--muted);line-height:1.6;font-size:13px}
+        .method-card .meta{color:#475569;font-size:12px;font-weight:600;margin-top:6px}
+        .form-card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px 24px;box-shadow:var(--shadow);margin-bottom:22px}
+        .form-card h2{margin:0 0 14px;font-size:20px;font-weight:600;letter-spacing:-.02em}
+        form.payment-form{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px;align-items:end}
+        .span-12{grid-column:span 12 / span 12}
+        .span-6{grid-column:span 6 / span 6}
+        form.payment-form label{display:grid;gap:6px;font-size:13px;font-weight:600;color:#1f2937}
+        form.payment-form input,form.payment-form select,form.payment-form textarea{
+          width:100%;border-radius:12px;border:1px solid var(--border);background:#fff;color:var(--text);padding:12px 14px;font:inherit;
+        }
+        form.payment-form input:focus,form.payment-form select:focus,form.payment-form textarea:focus{
+          outline:none;border-color:var(--orange);box-shadow:0 0 0 3px rgba(227,82,5,.12)
+        }
+        .btn{display:inline-flex;align-items:center;gap:8px;border:none;border-radius:12px;padding:12px 20px;font:inherit;font-weight:700;cursor:pointer;color:#fff;background:var(--orange);text-decoration:none}
+        .btn:hover{background:var(--orange-dark)}
+        .btn-block{width:100%}
+        .hint{margin:0;color:var(--muted);font-size:12px;line-height:1.6}
+        .section-title{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin:10px 0 14px}
+        .section-title h2{margin:0;font-size:18px;font-weight:600}
+        .doc-list{display:grid;gap:14px}
+        .doc-card{border:1px solid var(--line);background:#fcfcfc;border-radius:14px;padding:16px 18px}
+        .doc-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+        .doc-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:6px}
+        .doc-card h4{margin:0 0 6px;font-size:16px;font-weight:600}
+        .doc-meta{color:var(--muted);font-size:12px;margin:0}
+        .doc-pill{
+          display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:700;text-transform:capitalize;border:1px solid transparent;
+        }
+        .status-pending{background:#fffbeb;color:#92400e;border-color:#fde68a}
+        .status-in_review{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+        .status-approved{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+        .status-rejected{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+        .doc-body{margin-top:12px;display:grid;gap:8px}
+        .doc-notes{margin:0;color:#334155;line-height:1.6;font-size:13px}
+        .doc-reviewer{margin:0;color:#0f172a;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px}
+        .empty-state{border:1px dashed var(--border);background:#fff;border-radius:14px;padding:22px;text-align:center;color:var(--muted)}
+        .empty-state h4{margin:0 0 6px;color:#0f172a}
+        @media (max-width:960px){
+          .methods{grid-template-columns:1fr}
+          form.payment-form{grid-template-columns:repeat(6,minmax(0,1fr))}
+          .span-6{grid-column:span 6 / span 6}
+        }
+        @media (max-width:720px){
+          .topbar-inner{padding:0 16px}
+          .brand-text .title{font-size:14px}
+          .menu-toggle{display:inline-flex}
+          nav.topnav{
+            display:none;position:absolute;top:64px;left:0;right:0;background:#0b0b0b;
+            border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;flex-direction:column;align-items:stretch;gap:4px;
+            z-index:30;
+          }
+          nav.topnav.is-open{display:flex}
+          nav.topnav a{padding:12px 14px;border-radius:10px}
+          .page{padding:22px 16px 40px}
+          .fee-card{grid-template-columns:1fr;padding:20px;border-radius:16px}
+          form.payment-form{grid-template-columns:1fr}
+          .span-12,.span-6{grid-column:span 1 / span 1}
+        }
+      </style>
+    </head>
+    <body>
+      <header class="topbar">
+        <div class="topbar-inner">
+          <div class="brand">
+            <div class="brand-mark">INZ</div>
+            <div class="brand-text">
+              <div class="title">Immigration New Zealand</div>
+              <div class="sub">TE PAPA KAWANA KIWI</div>
+            </div>
+          </div>
+          <button class="menu-toggle" id="pay-toggle" type="button" aria-label="Toggle navigation" aria-controls="pay-nav" aria-expanded="false">
+            <span class="menu-lines" aria-hidden="true"><span></span><span></span><span></span></span>
+          </button>
+          <nav class="topnav" id="pay-nav">
+            <a href="/">Home</a>
+            <a href="/dashboard">Dashboard</a>
+            <a href="/payments" class="active">Payments</a>
+            <a href="/logout">Logout</a>
+          </nav>
+        </div>
+      </header>
+      <main class="page">
+        ${flash}
+        <section class="fee-card">
+          <div>
+            <h1>Application fee</h1>
+            <p>Your documents have been approved. Choose your preferred payment method to complete the application process.</p>
+          </div>
+          <div class="fee-amount">${escapeHtml(formatCurrencyCents(APPLICATION_FEE_CENTS))}</div>
+        </section>
+        <section class="methods">
+          ${PAYMENT_METHODS.map(method => `
+            <article class="method-card">
+              <h3>${escapeHtml(method.label)}</h3>
+              <p>${escapeHtml(method.description)}</p>
+              <div class="meta">Amount: ${escapeHtml(formatCurrencyCents(APPLICATION_FEE_CENTS))}</div>
+            </article>
+          `).join('')}
+        </section>
+        <section class="form-card">
+          <h2>Payment request</h2>
+          <form class="payment-form" method="POST" action="/payments/create">
+            <label class="span-6">
+              Payment method
+              <select name="method" required>${paymentMethodOptions}</select>
+            </label>
+            <label class="span-6">
+              Payment reference (optional)
+              <input type="text" name="reference" placeholder="e.g. bank payment receipt number">
+            </label>
+            <label class="span-6">
+              Proof of payment document ID (optional)
+              <input type="text" name="proofDocumentId" value="${escapeHtml(proofDocumentId)}" placeholder="Optional document ID for a receipt you already uploaded">
+            </label>
+            <label class="span-6">
+              Card number (demo mode)
+              <input type="text" name="cardNumber" placeholder="Card payment mode writes a paid demo record. No live card charges.">
+            </label>
+            <label class="span-12">
+              Payment notes
+              <textarea name="notes" rows="3" placeholder="Add any notes you want the admin team to see with this payment."></textarea>
+            </label>
+            <div class="span-12" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+              <p class="hint"><strong>Important:</strong> Bank transfers stay in <em>Verifying payment</em> status until the admin team approves them.</p>
+              <button type="submit" class="btn">Submit payment request</button>
+            </div>
+          </form>
+        </section>
+        <div class="section-title">
+          <h2>Payment history</h2>
+        </div>
+        <section class="doc-list">${paymentsMarkup}</section>
+      </main>
+      <script>
+        (function () {
+          var toggle = document.getElementById('pay-toggle');
+          var nav = document.getElementById('pay-nav');
+          if (!toggle || !nav) return;
+          toggle.addEventListener('click', function () {
+            var open = nav.classList.toggle('is-open');
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+          });
+          nav.addEventListener('click', function (event) {
+            var anchor = event.target && event.target.closest && event.target.closest('a');
+            if (anchor) {
+              nav.classList.remove('is-open');
+              toggle.setAttribute('aria-expanded', 'false');
+            }
+          });
+          window.addEventListener('resize', function () {
+            if (window.innerWidth > 720) {
+              nav.classList.remove('is-open');
+              toggle.setAttribute('aria-expanded', 'false');
+            }
+          });
+        })();
+      </script>
+    </body>
+    </html>
+  `);
+});
+
+app.post('/payments/create', isAuthenticated, async (req, res) => {
+  const approval = await getDocumentApprovalStatusForUser(req.user);
+  if (!approval.paymentUnlocked) {
+    return res.redirect(buildRedirect('/payments', { error: approval.summary || 'Payment is locked until documents are approved.' }));
+  }
+  const method = normalizeValue(req.body.method);
+  const reference = normalizeValue(req.body.reference);
+  const proofDocumentId = normalizeValue(req.body.proofDocumentId);
+  const notes = normalizeValue(req.body.notes);
+  if (!PAYMENT_METHODS.some(item => item.id === method)) {
+    return res.redirect(buildRedirect('/payments', { error: 'Please choose a valid payment method.' }));
+  }
+  if (method === 'bank') {
+    const proofs = proofDocumentId ? [await getDocumentById(proofDocumentId)].filter(Boolean) : [];
+    const approvedUserDocs = approval.documents || [];
+    const ownerProof = proofs.find(
+      doc => (doc.ownerUid && doc.ownerUid === req.user.uid) || (doc.ownerEmail && doc.ownerEmail.toLowerCase() === normalizeValue(req.user.email).toLowerCase())
+    );
+    if (!ownerProof && !reference) {
+      return res.redirect(buildRedirect('/payments', { error: 'Please include a payment reference or upload/upload a proof of payment first.' }));
+    }
+  }
+  try {
+    await createPaymentRecord({
+      ownerUid: req.user.uid,
+      ownerName: req.user.name || req.user.username,
+      ownerEmail: req.user.email,
+      method,
+      reference,
+      proofDocumentId,
+      notes,
+    });
+    const success = method === 'card'
+      ? 'Payment recorded successfully (demo card mode). Your payment is confirmed.'
+      : 'Bank transfer received. The admin team will verify your payment and update the status.';
+    return res.redirect(buildRedirect('/payments', { success }));
+  } catch (error) {
+    return res.redirect(buildRedirect('/payments', { error: error.message || 'Unable to create your payment request.' }));
+  }
 });
 
 app.get('/apply', isAuthenticated, async (req, res) => {
@@ -1640,6 +2943,8 @@ app.get('/admin', requireAdminSession, async (req, res) => {
     const applications = await listApplications();
     const users = await listPortalUsers();
     const verificationItems = await listVerificationRecords(10);
+    const documents = await listAllDocuments();
+    const payments = await listAllPayments();
     const pendingCount = applications.filter(item => item.status === 'pending').length;
     const inReviewCount = applications.filter(item => item.status === 'in_review').length;
     const approvedCount = applications.filter(item => item.status === 'approved').length;
@@ -1743,6 +3048,131 @@ app.get('/admin', requireAdminSession, async (req, res) => {
         `).join('')
       : '<tr><td colspan="4">No verification codes have been issued yet.</td></tr>';
 
+    const documentsMarkup = documents.length
+      ? documents.map(document => {
+          const badge = getDocumentStatusBadge(document.status);
+          const reviewerNote = normalizeValue(document.reviewerNote);
+          return `
+            <article class="queue-card doc-review-card" id="document-${escapeHtml(document.id)}">
+              <div class="queue-top">
+                <div>
+                  <div class="queue-eyebrow">${escapeHtml(document.documentType)}</div>
+                  <h3>${escapeHtml(document.displayName || document.originalName || 'Uploaded document')}</h3>
+                  <p class="queue-summary">
+                    Applicant: <strong>${escapeHtml(document.ownerName || document.ownerEmail || 'Unknown')}</strong>
+                    · ${escapeHtml(document.ownerEmail || 'No email')}
+                  </p>
+                </div>
+                <div class="queue-badges">
+                  <span class="status-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+                </div>
+              </div>
+              <div class="queue-meta">
+                <span><strong>Type</strong> ${escapeHtml(document.documentType)}</span>
+                <span><strong>Size</strong> ${escapeHtml(humanizeBytes(document.sizeBytes))}</span>
+                <span><strong>Submitted</strong> ${escapeHtml(formatDateTime(document.createdAtMs || document.updatedAtMs))}</span>
+                <span><strong>File</strong> <a href="/documents/${encodeURIComponent(document.id)}/download">Download</a></span>
+              </div>
+              <div class="queue-body">
+                <div class="queue-history">
+                  <h4>Document notes</h4>
+                  <ul>
+                    <li>
+                      <strong>Applicant note</strong>
+                      <span>${escapeHtml(formatDateTime(document.createdAtMs || document.updatedAtMs))}</span>
+                      <p>${escapeHtml(normalizeValue(document.notes) || 'No notes provided by the applicant.')}</p>
+                    </li>
+                    ${reviewerNote
+                      ? `<li>
+                          <strong>Admin note</strong>
+                          <span>${escapeHtml(formatDateTime(document.reviewedAtMs || document.updatedAtMs))}</span>
+                          <p>${escapeHtml(reviewerNote)}</p>
+                        </li>`
+                      : ''}
+                  </ul>
+                </div>
+                <form method="POST" action="/admin/documents/${encodeURIComponent(document.id)}/status" class="queue-form">
+                  <label>
+                    Reviewer note
+                    <textarea name="note" placeholder="Explain why the document was approved, rejected, or moved to in review.">${escapeHtml(reviewerNote)}</textarea>
+                  </label>
+                  <div class="queue-actions">
+                    <button type="submit" name="status" value="approved" class="btn btn-approve">Approve document</button>
+                    <button type="submit" name="status" value="in_review" class="btn btn-review">Mark In Review</button>
+                    <button type="submit" name="status" value="rejected" class="btn btn-reject">Reject document</button>
+                  </div>
+                </form>
+              </div>
+            </article>
+          `;
+        }).join('')
+      : '<div class="empty-state"><h3>No documents submitted yet</h3><p>Once users upload passport, identity, medical, or other required files, they appear here for approval.</p></div>';
+
+    const paymentsMarkup = payments.length
+      ? payments.map(payment => {
+          const badge = getPaymentStatusBadge(payment.status);
+          const methodMeta = PAYMENT_METHODS.find(item => item.id === payment.method) || { label: normalizeValue(payment.method) || 'Payment' };
+          const reviewerNote = normalizeValue(payment.reviewerNote);
+          const proofLink = normalizeValue(payment.proofDocumentId)
+            ? `<li><strong>Proof of payment</strong><span>Linked document</span><p><a href="/documents/${encodeURIComponent(payment.proofDocumentId)}/download">Download proof document</a></p></li>`
+            : '';
+          return `
+            <article class="queue-card doc-review-card" id="payment-${escapeHtml(payment.id)}">
+              <div class="queue-top">
+                <div>
+                  <div class="queue-eyebrow">${escapeHtml(methodMeta.label)}</div>
+                  <h3>${escapeHtml(payment.label)} · ${escapeHtml(formatCurrencyCents(payment.amountCents))}</h3>
+                  <p class="queue-summary">
+                    Applicant: <strong>${escapeHtml(payment.ownerName || payment.ownerEmail || 'Unknown')}</strong>
+                    · ${escapeHtml(payment.ownerEmail || 'No email')}
+                  </p>
+                </div>
+                <div class="queue-badges">
+                  <span class="status-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+                </div>
+              </div>
+              <div class="queue-meta">
+                <span><strong>Reference</strong> ${escapeHtml(payment.reference || 'N/A')}</span>
+                <span><strong>Amount</strong> ${escapeHtml(formatCurrencyCents(payment.amountCents))}</span>
+                <span><strong>Submitted</strong> ${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}</span>
+                <span><strong>Payment ID</strong> ${escapeHtml(payment.id)}</span>
+              </div>
+              <div class="queue-body">
+                <div class="queue-history">
+                  <h4>Payment notes</h4>
+                  <ul>
+                    <li>
+                      <strong>Applicant note</strong>
+                      <span>${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}</span>
+                      <p>${escapeHtml(normalizeValue(payment.notes) || 'No notes provided by the applicant.')}</p>
+                    </li>
+                    ${proofLink}
+                    ${reviewerNote
+                      ? `<li>
+                          <strong>Admin note</strong>
+                          <span>${escapeHtml(formatDateTime(payment.reviewedAtMs || payment.updatedAtMs))}</span>
+                          <p>${escapeHtml(reviewerNote)}</p>
+                        </li>`
+                      : ''}
+                  </ul>
+                </div>
+                <form method="POST" action="/admin/payments/${encodeURIComponent(payment.id)}/status" class="queue-form">
+                  <label>
+                    Reviewer note
+                    <textarea name="note" placeholder="Confirm the payment, request more info, or record a rejection reason.">${escapeHtml(reviewerNote)}</textarea>
+                  </label>
+                  <div class="queue-actions">
+                    <button type="submit" name="status" value="paid" class="btn btn-approve">Mark Paid</button>
+                    <button type="submit" name="status" value="in_review" class="btn btn-review">Mark In Review</button>
+                    <button type="submit" name="status" value="rejected" class="btn btn-reject">Reject payment</button>
+                  </div>
+                </form>
+              </div>
+            </article>
+          `;
+        }).join('')
+      : '<div class="empty-state"><h3>No payment requests yet</h3><p>Users can create payment requests only after their uploaded documents are fully approved.</p></div>';
+
     const activityMarkup = latestActivity.length
       ? latestActivity.map(item => `
           <li>
@@ -1768,6 +3198,8 @@ app.get('/admin', requireAdminSession, async (req, res) => {
         USER_MARKUP: userMarkup,
         VERIFICATION_MARKUP: verificationMarkup,
         ACTIVITY_MARKUP: activityMarkup,
+        DOCUMENT_MARKUP: documentsMarkup,
+        PAYMENT_MARKUP: paymentsMarkup,
         APPROVAL_STORAGE_TEXT: escapeHtml(isFirebaseConfigured() ? 'Firestore-backed production storage.' : `Local JSON database at ${LOCAL_DATABASE_FILE}`),
         USER_STORAGE_TEXT: escapeHtml(
           isFirebaseConfigured()
@@ -1779,6 +3211,30 @@ app.get('/admin', requireAdminSession, async (req, res) => {
     );
   } catch (error) {
     res.status(500).send(`Unable to load admin workspace: ${escapeHtml(error.message)}`);
+  }
+});
+
+app.post('/admin/documents/:id/status', requireAdminSession, async (req, res) => {
+  const id = normalizeValue(req.params.id);
+  const status = normalizeValue(req.body.status);
+  const note = normalizeValue(req.body.note);
+  try {
+    await reviewDocument(id, status, req.user, note);
+    res.redirect(buildRedirect('/admin#queue', { success: 'Document review decision saved successfully.' }));
+  } catch (error) {
+    res.redirect(buildRedirect('/admin', { error: error.message || 'Unable to update document status.' }));
+  }
+});
+
+app.post('/admin/payments/:id/status', requireAdminSession, async (req, res) => {
+  const id = normalizeValue(req.params.id);
+  const status = normalizeValue(req.body.status);
+  const note = normalizeValue(req.body.note);
+  try {
+    await reviewPayment(id, status, req.user, note);
+    res.redirect(buildRedirect('/admin#payments', { success: 'Payment review decision saved successfully.' }));
+  } catch (error) {
+    res.redirect(buildRedirect('/admin', { error: error.message || 'Unable to update payment status.' }));
   }
 });
 
