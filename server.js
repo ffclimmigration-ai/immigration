@@ -232,12 +232,20 @@ function isFirebaseConfigured() {
 }
 
 function ensureUploadDirectory() {
-  if (!fs.existsSync(DOCUMENT_UPLOAD_DIR)) {
-    fs.mkdirSync(DOCUMENT_UPLOAD_DIR, { recursive: true });
+  try {
+    const targetDir = DOCUMENT_UPLOAD_DIR;
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+    }
+    const testFile = path.join(targetDir, '.write-test');
+    fs.writeFileSync(testFile, String(Date.now()), 'utf8');
+    try { fs.unlinkSync(testFile); } catch (_) { /* ignore */ }
+    return true;
+  } catch (error) {
+    console.warn(`[storage] ensureUploadDirectory failed for ${DOCUMENT_UPLOAD_DIR}. Uploads will fall back to Firestore base64 payload if available. Error: ${error.message || error}`);
+    return false;
   }
 }
-
-ensureUploadDirectory();
 
 function formatCurrencyCents(cents) {
   const amount = (Number(cents) || 0) / 100;
@@ -3991,6 +3999,13 @@ async function startServer() {
     await ensureDefaultAdminAccount();
   } catch (error) {
     console.error('Unable to ensure default admin account:', error.message || error);
+  }
+
+  try {
+    const storageReady = ensureUploadDirectory();
+    console.log(`[storage] Local upload directory ${storageReady ? 'READY' : 'UNAVAILABLE'} (${DOCUMENT_UPLOAD_DIR})`);
+  } catch (error) {
+    console.warn('[storage] ensureUploadDirectory deferred, continuing with Firestore/base64 fallback:', error.message || error);
   }
 
   app.listen(PORT, () => {

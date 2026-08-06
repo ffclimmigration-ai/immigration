@@ -17,11 +17,11 @@ services:
       - key: PORT
         value: "10000"
       - key: RENDER_DISK_ROOT
-        value: /var/data
+        value: /opt/render/project/portal-data
       - key: LOCAL_DATABASE_FILE
-        value: /var/data/data/portal-db.json
+        value: /opt/render/project/portal-data/data/portal-db.json
       - key: DOCUMENT_UPLOAD_DIR
-        value: /var/data/uploads/documents
+        value: /opt/render/project/portal-data/uploads/documents
       - key: FIREBASE_PROJECT_ID
         sync: false
       - key: FIREBASE_CLIENT_EMAIL
@@ -30,7 +30,7 @@ services:
         sync: false
     disks:
       - name: portal-data
-        mountPath: /var/data
+        mountPath: /opt/render/project/portal-data
         sizeGB: 10
     healthCheckPath: /healthz
     domains: []
