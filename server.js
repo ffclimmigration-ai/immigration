@@ -10,17 +10,22 @@ const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3002;
+const RENDER_DISK_ROOT = process.env.RENDER_DISK_ROOT || '';
 const COOKIE_MAX_AGE = 60 * 60 * 1000;
 const USER_COOKIE_NAME = 'user';
 const ADMIN_COOKIE_NAME = 'admin_user';
-const LOCAL_DATABASE_FILE = path.join(__dirname, 'data', 'portal-db.json');
+const LOCAL_DATABASE_FILE = process.env.LOCAL_DATABASE_FILE
+  ? path.resolve(process.env.LOCAL_DATABASE_FILE)
+  : (RENDER_DISK_ROOT ? path.join(RENDER_DISK_ROOT, 'data', 'portal-db.json') : path.join(__dirname, 'data', 'portal-db.json'));
 const SECURE_USER_COLLECTION = process.env.SECURE_USER_COLLECTION || 'secureUsers';
 const LEGACY_USER_COLLECTION = 'users';
 const APPLICATION_COLLECTION = process.env.APPLICATION_COLLECTION || 'applications';
 const VERIFICATION_COLLECTION = process.env.VERIFICATION_COLLECTION || 'verificationCodes';
 const DOCUMENT_COLLECTION = process.env.DOCUMENT_COLLECTION || 'documents';
 const PAYMENT_COLLECTION = process.env.PAYMENT_COLLECTION || 'payments';
-const DOCUMENT_UPLOAD_DIR = path.join(__dirname, 'uploads', 'documents');
+const DOCUMENT_UPLOAD_DIR = process.env.DOCUMENT_UPLOAD_DIR
+  ? path.resolve(process.env.DOCUMENT_UPLOAD_DIR)
+  : (RENDER_DISK_ROOT ? path.join(RENDER_DISK_ROOT, 'uploads', 'documents') : path.join(__dirname, 'uploads', 'documents'));
 const MAX_DOCUMENT_SIZE_BYTES = 12 * 1024 * 1024;
 const ALLOWED_DOCUMENT_EXTENSIONS = new Set([
   '.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.rtf',
@@ -82,6 +87,31 @@ try {
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 app.use(cookieParser());
+
+app.get('/healthz', (req, res) => {
+  const storageMode = isFirebaseConfigured() ? 'firestore' : 'local-json';
+  res.status(200).json({
+    status: 'ok',
+    timeMs: Date.now(),
+    uptimeSeconds: process.uptime(),
+    storage: {
+      mode: storageMode,
+      databaseFile: LOCAL_DATABASE_FILE,
+      uploadDir: DOCUMENT_UPLOAD_DIR,
+      renderDiskRoot: process.env.RENDER_DISK_ROOT || '',
+      firebase: {
+        configured: isFirebaseConfigured(),
+        initError: firebaseInitError || null,
+      },
+    },
+    features: {
+      adminRequests: true,
+      documentGate: true,
+      fileUploads: Boolean(documentUploadHandler),
+      multer: Boolean(multer),
+    },
+  });
+});
 
 // File upload handling for documents. Documents are always stored server-side
 // (local disk or Firestore base64 payload) depending on Firebase configuration.

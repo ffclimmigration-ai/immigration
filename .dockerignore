@@ -1,0 +1,14 @@
+node_modules
+npm-debug.log
+yarn-error.log
+.env
+.env.*
+.git
+.gitignore
+.vscode
+*.md
+scripts
+check_links.py
+check_links.js
+e -i HEAD~3
+.DS_Store

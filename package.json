@@ -2,9 +2,12 @@
   "name": "immigration-portal",
   "version": "1.0.0",
   "description": "Immigration New Zealand portal with login",
+  "engines": {
+    "node": ">=18.x"
+  },
   "main": "server.js",
   "scripts": {
-    "build": "node scripts/prepare-vercel-static.js",
+    "build": "node scripts/prepare-vercel-static.js || true",
     "start": "node server.js",
     "dev": "node server.js"
   },
