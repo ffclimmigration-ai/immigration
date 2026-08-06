@@ -239,10 +239,18 @@ function getPaymentStatusBadge(status) {
   switch (clean) {
     case 'paid':
       return { label: 'Paid', className: 'status-approved' };
+    case 'settled':
+      return { label: 'Settled', className: 'status-approved' };
     case 'rejected':
       return { label: 'Failed', className: 'status-rejected' };
     case 'in_review':
       return { label: 'Verifying payment', className: 'status-in_review' };
+    case 'requested':
+      return { label: 'Payment requested', className: 'status-in_review' };
+    case 'expired':
+      return { label: 'Expired', className: 'status-rejected' };
+    case 'cancelled':
+      return { label: 'Cancelled', className: 'status-rejected' };
     case 'pending':
     default:
       return { label: 'Payment pending', className: 'status-pending' };
@@ -1280,19 +1288,34 @@ async function createPaymentRecord(paymentData) {
   const id = crypto.randomBytes(12).toString('hex');
   const method = PAYMENT_METHODS.some(item => item.id === paymentData.method)
     ? paymentData.method
-    : 'bank';
+    : (paymentData.method === 'request' ? 'request' : 'bank');
+  const customAmount = Number(paymentData.amountCents);
+  const amountCents = customAmount > 0 ? customAmount : APPLICATION_FEE_CENTS;
+  const label = normalizeValue(paymentData.label) || APPLICATION_FEE_LABEL;
+  const dueDateMs = paymentData.dueDateMs
+    ? Number(paymentData.dueDateMs) || null
+    : (paymentData.dueDate ? new Date(paymentData.dueDate).getTime() : null);
   const baseRecord = {
     id,
     ownerUid: normalizeValue(paymentData.ownerUid),
     ownerName: normalizeValue(paymentData.ownerName),
     ownerEmail: normalizeValue(paymentData.ownerEmail),
     method,
-    amountCents: APPLICATION_FEE_CENTS,
-    label: APPLICATION_FEE_LABEL,
+    amountCents,
+    label,
     reference: normalizeValue(paymentData.reference) || `PAY-${id.toUpperCase().slice(0, 8)}`,
     notes: normalizeValue(paymentData.notes),
     proofDocumentId: normalizeValue(paymentData.proofDocumentId),
-    status: method === 'bank' ? 'in_review' : 'paid',
+    relatedRequestId: normalizeValue(paymentData.relatedRequestId),
+    isAdminRequest: Boolean(paymentData.isAdminRequest),
+    requestedByUid: normalizeValue(paymentData.requestedByUid),
+    requestedByName: normalizeValue(paymentData.requestedByName),
+    requestedByEmail: normalizeValue(paymentData.requestedByEmail),
+    requestNote: normalizeValue(paymentData.requestNote),
+    dueDateMs: dueDateMs || null,
+    emailSent: Boolean(paymentData.emailSent),
+    emailStatus: normalizeValue(paymentData.emailStatus) || '',
+    status: paymentData.status || (method === 'bank' ? 'in_review' : method === 'request' ? 'requested' : 'paid'),
     reviewerName: method === 'card' ? 'Stripe (demo)' : '',
     reviewerEmail: '',
     reviewerNote: method === 'card' ? 'Payment confirmed in card demo mode.' : '',
@@ -1315,6 +1338,37 @@ async function createPaymentRecord(paymentData) {
   indexDemoPayment(baseRecord);
   persistLocalState();
   return baseRecord;
+}
+
+async function createAdminPaymentRequest(requestData, requester) {
+  const dueDateInput = normalizeValue(requestData.dueDate);
+  let dueDateMs = null;
+  if (dueDateInput) {
+    const parsed = new Date(dueDateInput);
+    if (!Number.isNaN(parsed.getTime())) dueDateMs = parsed.getTime();
+  }
+  const now = Date.now();
+  const emailStatus = 'demo only (saved to dashboard)';
+  const record = await createPaymentRecord({
+    ownerUid: normalizeValue(requestData.ownerUid),
+    ownerName: normalizeValue(requestData.ownerName),
+    ownerEmail: normalizeValue(requestData.ownerEmail),
+    method: 'request',
+    amountCents: Number(requestData.amountCents) || APPLICATION_FEE_CENTS,
+    label: normalizeValue(requestData.label) || APPLICATION_FEE_LABEL,
+    reference: normalizeValue(requestData.reference) || `REQ-${now.toString(36).toUpperCase()}`,
+    notes: normalizeValue(requestData.notes),
+    requestNote: normalizeValue(requestData.requestNote),
+    status: 'requested',
+    isAdminRequest: true,
+    requestedByUid: normalizeValue(requester && requester.uid) || normalizeValue(requester && (requester.email || requester.username)),
+    requestedByName: normalizeValue((requester && (requester.name || requester.username)) || 'Admin'),
+    requestedByEmail: normalizeValue(requester && requester.email) || '',
+    dueDateMs,
+    emailSent: true,
+    emailStatus,
+  });
+  return record;
 }
 
 async function listAllPayments() {
@@ -1354,7 +1408,7 @@ async function getPaymentById(id) {
 
 async function reviewPayment(id, status, reviewer, note) {
   const cleanStatus = normalizeValue(status);
-  if (!['paid', 'rejected', 'in_review', 'pending'].includes(cleanStatus)) {
+  if (!['paid', 'rejected', 'in_review', 'pending', 'requested', 'cancelled', 'settled', 'expired'].includes(cleanStatus)) {
     throw new Error('Invalid payment review status.');
   }
   const cleanNote = normalizeValue(note);
@@ -1390,6 +1444,54 @@ async function reviewPayment(id, status, reviewer, note) {
   indexDemoPayment(stored);
   persistLocalState();
   return stored;
+}
+
+async function settleAdminPaymentRequest(requestId, paymentId, status) {
+  if (!requestId) return;
+  const reviewedAtMs = Date.now();
+  const cleanStatus = normalizeValue(status) || 'in_review';
+  const updates = {
+    status: cleanStatus,
+    relatedRequestId: normalizeValue(requestId),
+    updatedAtMs: reviewedAtMs,
+  };
+  if (isFirebaseConfigured()) {
+    const firestore = ensureFirebaseReady();
+    const ref = firestore.collection(PAYMENT_COLLECTION).doc(requestId);
+    const snapshot = await ref.get();
+    if (snapshot.exists) {
+      await ref.set(
+        {
+          status: cleanStatus === 'paid' ? 'settled' : cleanStatus,
+          relatedRequestId: normalizeValue(requestId),
+          relatedPaymentId: normalizeValue(paymentId),
+          updatedAtMs: reviewedAtMs,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+    }
+    return;
+  }
+  const stored = demoPayments.get(requestId);
+  if (stored) {
+    stored.status = cleanStatus === 'paid' ? 'settled' : cleanStatus;
+    stored.relatedRequestId = normalizeValue(requestId);
+    stored.relatedPaymentId = normalizeValue(paymentId);
+    stored.updatedAtMs = reviewedAtMs;
+    demoPayments.set(requestId, stored);
+    indexDemoPayment(stored);
+  }
+  if (paymentId) {
+    const payment = demoPayments.get(paymentId);
+    if (payment) {
+      payment.relatedRequestId = normalizeValue(requestId);
+      payment.updatedAtMs = reviewedAtMs;
+      demoPayments.set(paymentId, payment);
+      indexDemoPayment(payment);
+    }
+  }
+  persistLocalState();
 }
 
 function humanizeBytes(bytes) {
@@ -1786,6 +1888,8 @@ app.get('/dashboard', isAuthenticated, async (req, res) => {
   const approval = await getDocumentApprovalStatusForUser(req.user);
   const documents = approval.documents || [];
   const payments = await listPaymentsForUser(req.user);
+  const adminRequests = payments.filter(p => Boolean(p.isAdminRequest) && (p.status === 'requested' || p.status === 'in_review'));
+  const regularPayments = payments.filter(p => !Boolean(p.isAdminRequest) || p.status === 'paid' || p.status === 'settled' || p.status === 'rejected' || p.status === 'cancelled' || p.status === 'expired');
   const success = normalizeValue(req.query.success);
   const error = normalizeValue(req.query.error);
   const flash = success
@@ -1845,8 +1949,46 @@ app.get('/dashboard', isAuthenticated, async (req, res) => {
       }).join('')
     : `<div class="empty-state"><h4>No documents uploaded yet</h4><p>Use the form below to upload each required document. The admin team will review them before payment is unlocked.</p></div>`;
 
-  const paymentsMarkup = payments.length
-    ? payments.map(payment => {
+  const adminRequestsMarkup = adminRequests.length
+    ? adminRequests.map(request => {
+        const badge = getPaymentStatusBadge(request.status);
+        const dueDateText = request.dueDateMs ? formatDateTime(request.dueDateMs) : 'No due date set';
+        const canPay = approval.paymentUnlocked || true;
+        const payCta = canPay
+          ? `<a class="btn" href="/payments?requestId=${encodeURIComponent(request.id)}">Pay this request →</a>`
+          : `<a class="btn btn-secondary" href="/dashboard">Upload documents first</a>`;
+        return `
+          <article class="payment-card request-card">
+            <div class="doc-head">
+              <div>
+                <div class="doc-type">Request from Admin · reference ${escapeHtml(request.reference)}</div>
+                <h4>${escapeHtml(request.label)}</h4>
+                <p class="doc-meta">
+                  Requested by <strong>${escapeHtml(request.requestedByName || 'Admin')}</strong>
+                  · Sent to ${escapeHtml(request.ownerEmail || 'your account')}
+                  · Due <strong>${escapeHtml(dueDateText)}</strong>
+                </p>
+              </div>
+              <span class="doc-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+            </div>
+            <div class="doc-body">
+              <div class="request-amount">
+                <div>
+                  <span class="request-label">Amount requested</span>
+                  <span class="request-currency">${escapeHtml(formatCurrencyCents(request.amountCents))}</span>
+                </div>
+                ${payCta}
+              </div>
+              ${normalizeValue(request.requestNote) ? `<div class="doc-reviewer"><strong>Message from admin:</strong><p>${escapeHtml(request.requestNote)}</p></div>` : ''}
+              ${normalizeValue(request.emailStatus) ? `<p class="doc-meta">Email record: ${escapeHtml(request.emailStatus)}</p>` : ''}
+            </div>
+          </article>
+        `;
+      }).join('')
+    : '';
+
+  const paymentsMarkup = regularPayments.length
+    ? regularPayments.map(payment => {
         const badge = getPaymentStatusBadge(payment.status);
         const methodMeta = PAYMENT_METHODS.find(item => item.id === payment.method) || { label: normalizeValue(payment.method) || 'Payment' };
         return `
@@ -1866,6 +2008,7 @@ app.get('/dashboard', isAuthenticated, async (req, res) => {
             <div class="doc-body">
               ${normalizeValue(payment.notes) ? `<p class="doc-notes"><strong>Notes:</strong> ${escapeHtml(payment.notes)}</p>` : ''}
               ${normalizeValue(payment.reviewerNote) ? `<p class="doc-reviewer"><strong>Admin note:</strong> ${escapeHtml(payment.reviewerNote)} <span class="doc-meta">· ${escapeHtml(formatDateTime(payment.reviewedAtMs || payment.updatedAtMs))}</span></p>` : ''}
+              ${payment.isAdminRequest && payment.relatedPaymentId ? `<p class="doc-meta">Request settled via payment ID ${escapeHtml(payment.relatedPaymentId)}</p>` : ''}
             </div>
           </article>
         `;
@@ -2164,7 +2307,20 @@ app.get('/dashboard', isAuthenticated, async (req, res) => {
         .doc-body{margin-top:12px;display:grid;gap:8px}
         .doc-notes{margin:0;color:#334155;line-height:1.6;font-size:13px}
         .doc-reviewer{margin:0;color:#0f172a;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px}
+        .doc-reviewer p{margin:6px 0 0;line-height:1.6}
         .doc-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
+        .request-card{
+          background:linear-gradient(180deg,#fff7ed 0%,#ffffff 60%);
+          border:1px solid #fed7aa;
+          box-shadow:0 6px 20px rgba(227,82,5,.06);
+        }
+        .request-amount{
+          display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+          border-top:1px dashed #fdba74;padding-top:12px;
+        }
+        .request-amount > div{display:grid;gap:4px}
+        .request-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#9a3412;font-weight:700}
+        .request-currency{font-size:26px;font-weight:800;letter-spacing:-.03em;color:var(--orange)}
         .link-btn{
           display:inline-flex;align-items:center;gap:6px;font-weight:600;color:var(--orange);text-decoration:none;font-size:13px;
         }
@@ -2331,6 +2487,16 @@ app.get('/dashboard', isAuthenticated, async (req, res) => {
           <div class="doc-list">${documentsMarkup}</div>
         </section>
 
+        ${adminRequestsMarkup ? `
+          <div class="section-title">
+            <h2>Requests from Admin</h2>
+            <span class="hint">Payment demands sent directly to your account. Click Pay this request to settle it from the payment options page.</span>
+          </div>
+          <section class="payments-card">
+            <div class="payment-list">${adminRequestsMarkup}</div>
+          </section>
+        ` : ''}
+
         ${paymentsMarkup ? `
           <div class="section-title">
             <h2>Payment history</h2>
@@ -2454,6 +2620,12 @@ app.use('/documents/upload', (error, req, res, next) => {
 app.get('/payments', isAuthenticated, async (req, res) => {
   const approval = await getDocumentApprovalStatusForUser(req.user);
   const payments = await listPaymentsForUser(req.user);
+  const requestId = normalizeValue(req.query.requestId);
+  const activeRequest = requestId ? await getPaymentById(requestId) : null;
+  const isValidRequest = activeRequest
+    && ((activeRequest.ownerUid && req.user.uid && activeRequest.ownerUid === req.user.uid)
+      || (activeRequest.ownerEmail && req.user.email && activeRequest.ownerEmail.toLowerCase() === normalizeValue(req.user.email).toLowerCase()))
+    && (activeRequest.status === 'requested' || activeRequest.status === 'in_review');
   const success = normalizeValue(req.query.success);
   const error = normalizeValue(req.query.error);
   const flash = success
@@ -2462,7 +2634,7 @@ app.get('/payments', isAuthenticated, async (req, res) => {
       ? `<div class="flash flash-error">${escapeHtml(error)}</div>`
       : '';
 
-  if (!approval.paymentUnlocked) {
+  if (!approval.paymentUnlocked && !isValidRequest) {
     res.send(`
       <!doctype html>
       <html lang="en-NZ">
@@ -2477,12 +2649,15 @@ app.get('/payments', isAuthenticated, async (req, res) => {
           :root{--orange:#e35205;--orange-dark:#cf4900;--bg:#f3f3f3;--text:#1f1f1f;--muted:#6f6f6f;--line:#d5d5d5;--card:#fff;--shadow:0 2px 8px rgba(0,0,0,.06)}
           *{box-sizing:border-box}
           body{margin:0;font-family:"Inter",Arial,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-          .topbar{background:#000;height:64px;display:flex;align-items:center;border-bottom:3px solid var(--orange)}
+          .topbar{background:#000;height:64px;display:flex;align-items:center;border-bottom:3px solid var(--orange);position:relative}
           .topbar-inner{width:100%;max-width:1280px;margin:0 auto;padding:0 28px;display:flex;justify-content:space-between;align-items:center;gap:16px}
           .brand{display:flex;align-items:center;gap:14px;color:#fff;min-width:0}
           .brand-mark{width:36px;height:36px;border-radius:8px;background:var(--orange);display:grid;place-items:center;color:#fff;font-weight:800}
           .brand-text .title{font-size:16px;font-weight:700}
           .brand-text .sub{font-size:10px;color:#bdbdbd;margin-top:2px}
+          .menu-toggle{display:none;width:44px;height:44px;border-radius:10px;border:1px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;align-items:center;justify-content:center;cursor:pointer;padding:0}
+          .menu-lines{display:grid;gap:5px}
+          .menu-lines span{display:block;width:18px;height:2px;border-radius:999px;background:rgba(255,255,255,.9)}
           nav.topnav{display:flex;align-items:center;gap:4px}
           nav.topnav a{color:#e8e8e8;text-decoration:none;font-size:13px;font-weight:500;padding:8px 14px;border-radius:6px}
           nav.topnav a:hover{background:rgba(255,255,255,.08);color:#fff}
@@ -2496,9 +2671,30 @@ app.get('/payments', isAuthenticated, async (req, res) => {
           .lock-card p{margin:0 0 22px;color:var(--muted);line-height:1.7}
           .btn{display:inline-flex;align-items:center;gap:8px;border:none;border-radius:12px;padding:12px 18px;font:inherit;font-weight:700;cursor:pointer;color:#fff;background:var(--orange);text-decoration:none}
           .btn:hover{background:var(--orange-dark)}
-          @media (max-width:640px){
+          .history-title{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;margin:10px 0 14px}
+          .history-title h2{margin:0;font-size:18px;font-weight:600}
+          .doc-list{display:grid;gap:14px}
+          .doc-card{border:1px solid var(--line);background:#fcfcfc;border-radius:14px;padding:16px 18px}
+          .doc-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-start;flex-wrap:wrap}
+          .doc-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:6px}
+          .doc-card h4{margin:0 0 6px;font-size:16px;font-weight:600}
+          .doc-meta{color:var(--muted);font-size:12px;margin:0}
+          .doc-pill{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:999px;font-size:12px;font-weight:700;text-transform:capitalize;border:1px solid transparent}
+          .status-pending{background:#fffbeb;color:#92400e;border-color:#fde68a}
+          .status-in_review{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+          .status-approved{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+          .status-rejected{background:#fef2f2;color:#991b1b;border-color:#fecaca}
+          .status-settled{background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+          .status-requested{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+          .doc-body{margin-top:12px;display:grid;gap:8px}
+          .doc-notes{margin:0;color:#334155;line-height:1.6;font-size:13px}
+          .doc-reviewer{margin:0;color:#0f172a;background:#f8fafc;border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:13px}
+          @media (max-width:720px){
             .topbar-inner{padding:0 16px}
-            nav.topnav{display:none}
+            .menu-toggle{display:inline-flex}
+            nav.topnav{display:none;position:absolute;top:64px;left:0;right:0;background:#0b0b0b;border-top:1px solid rgba(255,255,255,.08);padding:12px 16px;flex-direction:column;align-items:stretch;gap:4px;z-index:30}
+            nav.topnav.is-open{display:flex}
+            nav.topnav a{padding:12px 14px;border-radius:10px}
             .page{padding:24px 16px 40px}
           }
         </style>
@@ -2513,7 +2709,10 @@ app.get('/payments', isAuthenticated, async (req, res) => {
                 <div class="sub">TE PAPA KAWANA KIWI</div>
               </div>
             </div>
-            <nav class="topnav">
+            <button class="menu-toggle" id="pay-toggle" type="button" aria-label="Toggle navigation" aria-controls="pay-nav" aria-expanded="false">
+              <span class="menu-lines" aria-hidden="true"><span></span><span></span><span></span></span>
+            </button>
+            <nav class="topnav" id="pay-nav">
               <a href="/dashboard">Dashboard</a>
               <a href="/payments" class="active">Payments</a>
               <a href="/logout">Logout</a>
@@ -2523,11 +2722,65 @@ app.get('/payments', isAuthenticated, async (req, res) => {
         <main class="page">
           ${flash}
           <section class="lock-card">
-            <h1>Payment options are locked until your documents are approved.</h1>
+            <h1>${approval.paymentUnlocked ? 'Payment options are available.' : 'Payment options are locked until your documents are approved.'}</h1>
             <p>${escapeHtml(approval.summary)}</p>
-            <a class="btn" href="/dashboard">Go back to Dashboard</a>
+            ${payments.length ? `
+              <div class="history-title">
+                <h2>Payment history</h2>
+              </div>
+              <div class="doc-list">
+                ${payments.map(payment => {
+                  const badge = getPaymentStatusBadge(payment.status);
+                  const methodMeta = PAYMENT_METHODS.find(item => item.id === payment.method) || { label: normalizeValue(payment.method) || 'Payment' };
+                  const requestTag = payment.isAdminRequest
+                    ? `<span class="doc-meta"> · Admin request${payment.relatedPaymentId ? ` (settled via ${escapeHtml(payment.relatedPaymentId)})` : ''}</span>`
+                    : '';
+                  return `
+                    <article class="doc-card">
+                      <div class="doc-head">
+                        <div>
+                          <div class="doc-type">${escapeHtml(methodMeta.label)}</div>
+                          <h4>${escapeHtml(payment.label)}</h4>
+                          <p class="doc-meta">Reference <strong>${escapeHtml(payment.reference)}</strong> · ${escapeHtml(formatCurrencyCents(payment.amountCents))} · ${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}${requestTag}</p>
+                        </div>
+                        <span class="doc-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
+                      </div>
+                      <div class="doc-body">
+                        ${normalizeValue(payment.notes) ? `<p class="doc-notes"><strong>Notes:</strong> ${escapeHtml(payment.notes)}</p>` : ''}
+                        ${normalizeValue(payment.reviewerNote) ? `<p class="doc-reviewer"><strong>Admin note:</strong> ${escapeHtml(payment.reviewerNote)} <span class="doc-meta">· ${escapeHtml(formatDateTime(payment.reviewedAtMs || payment.updatedAtMs))}</span></p>` : ''}
+                      </div>
+                    </article>
+                  `;
+                }).join('')}
+              </div>
+              <p style="margin-top:18px"><a class="btn" href="/dashboard">Go back to Dashboard</a></p>
+            ` : '<a class="btn" href="/dashboard">Go back to Dashboard</a>'}
           </section>
         </main>
+        <script>
+          (function () {
+            var toggle = document.getElementById('pay-toggle');
+            var nav = document.getElementById('pay-nav');
+            if (!toggle || !nav) return;
+            toggle.addEventListener('click', function () {
+              var open = nav.classList.toggle('is-open');
+              toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+            nav.addEventListener('click', function (event) {
+              var anchor = event.target && event.target.closest && event.target.closest('a');
+              if (anchor) {
+                nav.classList.remove('is-open');
+                toggle.setAttribute('aria-expanded', 'false');
+              }
+            });
+            window.addEventListener('resize', function () {
+              if (window.innerWidth > 720) {
+                nav.classList.remove('is-open');
+                toggle.setAttribute('aria-expanded', 'false');
+              }
+            });
+          })();
+        </script>
       </body>
       </html>
     `);
@@ -2535,6 +2788,26 @@ app.get('/payments', isAuthenticated, async (req, res) => {
   }
 
   const proofDocumentId = normalizeValue(req.query.proofDocumentId);
+  const effectiveAmountCents = isValidRequest && activeRequest ? activeRequest.amountCents : APPLICATION_FEE_CENTS;
+  const effectiveLabel = isValidRequest && activeRequest ? activeRequest.label : APPLICATION_FEE_LABEL;
+  const defaultReference = isValidRequest && activeRequest ? (activeRequest.reference || '') : '';
+  const requestBanner = isValidRequest && activeRequest
+    ? `
+        <section class="request-banner">
+          <div>
+            <div class="rb-eyebrow">Payment request from admin</div>
+            <h1>${escapeHtml(activeRequest.label)}</h1>
+            <p class="rb-meta">
+              Reference <strong>${escapeHtml(activeRequest.reference || 'N/A')}</strong>
+              · Requested by ${escapeHtml(activeRequest.requestedByName || 'Admin')}
+              ${activeRequest.dueDateMs ? ` · Due ${escapeHtml(formatDateTime(activeRequest.dueDateMs))}` : ''}
+            </p>
+            ${normalizeValue(activeRequest.requestNote) ? `<p class="rb-note"><strong>Admin message:</strong> ${escapeHtml(activeRequest.requestNote)}</p>` : ''}
+          </div>
+          <div class="rb-amount">${escapeHtml(formatCurrencyCents(activeRequest.amountCents))}</div>
+        </section>
+      `
+    : '';
   const paymentMethodOptions = PAYMENT_METHODS
     .map(method => `<option value="${escapeHtml(method.id)}">${escapeHtml(method.label)}</option>`)
     .join('');
@@ -2542,13 +2815,16 @@ app.get('/payments', isAuthenticated, async (req, res) => {
     ? payments.map(payment => {
         const badge = getPaymentStatusBadge(payment.status);
         const methodMeta = PAYMENT_METHODS.find(item => item.id === payment.method) || { label: normalizeValue(payment.method) || 'Payment' };
+        const requestTag = payment.isAdminRequest
+          ? `<span class="doc-meta"> · Admin request${payment.relatedPaymentId ? ` (settled via ${escapeHtml(payment.relatedPaymentId)})` : ''}</span>`
+          : '';
         return `
           <article class="doc-card">
             <div class="doc-head">
               <div>
                 <div class="doc-type">${escapeHtml(methodMeta.label)}</div>
                 <h4>${escapeHtml(payment.label)}</h4>
-                <p class="doc-meta">Reference <strong>${escapeHtml(payment.reference)}</strong> · ${escapeHtml(formatCurrencyCents(payment.amountCents))} · ${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}</p>
+                <p class="doc-meta">Reference <strong>${escapeHtml(payment.reference)}</strong> · ${escapeHtml(formatCurrencyCents(payment.amountCents))} · ${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}${requestTag}</p>
               </div>
               <span class="doc-pill ${escapeHtml(badge.className)}">${escapeHtml(badge.label)}</span>
             </div>
@@ -2607,6 +2883,20 @@ app.get('/payments', isAuthenticated, async (req, res) => {
         .flash{padding:14px 16px;border-radius:14px;font-weight:600;margin-bottom:22px;border:1px solid transparent}
         .flash-success{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
         .flash-error{background:#fef2f2;border-color:#fecaca;color:#991b1b}
+        .request-banner{
+          background:linear-gradient(135deg,#fff7ed 0%,#ffffff 100%);
+          border:1px solid #fed7aa;
+          border-radius:18px;
+          padding:24px;
+          box-shadow:0 6px 20px rgba(227,82,5,.08);
+          display:grid;grid-template-columns:1fr auto;gap:20px;align-items:center;
+          margin-bottom:22px;
+        }
+        .request-banner h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.02em;color:var(--text)}
+        .rb-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#9a3412;font-weight:700;margin-bottom:8px}
+        .rb-meta{margin:6px 0 0;color:#475569;font-size:13px}
+        .rb-note{margin:12px 0 0;background:#fff;border:1px dashed #fdba74;border-radius:12px;padding:10px 12px;color:#1f2937;line-height:1.6;font-size:13px}
+        .rb-amount{font-size:34px;font-weight:800;letter-spacing:-.04em;color:var(--orange)}
         .fee-card{
           background:linear-gradient(135deg,var(--orange) 0%,#f26b22 100%);color:#fff;border-radius:18px;padding:24px;margin-bottom:22px;
           display:grid;grid-template-columns:1fr auto;gap:16px;align-items:center;
@@ -2675,6 +2965,7 @@ app.get('/payments', isAuthenticated, async (req, res) => {
           nav.topnav.is-open{display:flex}
           nav.topnav a{padding:12px 14px;border-radius:10px}
           .page{padding:22px 16px 40px}
+          .request-banner{grid-template-columns:1fr;padding:20px;border-radius:16px}
           .fee-card{grid-template-columns:1fr;padding:20px;border-radius:16px}
           form.payment-form{grid-template-columns:1fr}
           .span-12,.span-6{grid-column:span 1 / span 1}
@@ -2704,32 +2995,35 @@ app.get('/payments', isAuthenticated, async (req, res) => {
       </header>
       <main class="page">
         ${flash}
+        ${requestBanner || `
         <section class="fee-card">
           <div>
-            <h1>Application fee</h1>
-            <p>Your documents have been approved. Choose your preferred payment method to complete the application process.</p>
+            <h1>${escapeHtml(effectiveLabel)}</h1>
+            <p>${approval.paymentUnlocked ? 'Your documents have been approved. Choose your preferred payment method to complete the application process.' : 'Documents still pending. A payment request from admin allows you to pay directly from here before document review finishes.'}</p>
           </div>
-          <div class="fee-amount">${escapeHtml(formatCurrencyCents(APPLICATION_FEE_CENTS))}</div>
+          <div class="fee-amount">${escapeHtml(formatCurrencyCents(effectiveAmountCents))}</div>
         </section>
+        `}
         <section class="methods">
           ${PAYMENT_METHODS.map(method => `
             <article class="method-card">
               <h3>${escapeHtml(method.label)}</h3>
               <p>${escapeHtml(method.description)}</p>
-              <div class="meta">Amount: ${escapeHtml(formatCurrencyCents(APPLICATION_FEE_CENTS))}</div>
+              <div class="meta">Amount: ${escapeHtml(formatCurrencyCents(effectiveAmountCents))}</div>
             </article>
           `).join('')}
         </section>
         <section class="form-card">
-          <h2>Payment request</h2>
+          <h2>${isValidRequest ? 'Settle admin payment request' : 'Payment request'}</h2>
           <form class="payment-form" method="POST" action="/payments/create">
+            ${isValidRequest ? `<input type="hidden" name="requestId" value="${escapeHtml(activeRequest.id)}">` : ''}
             <label class="span-6">
               Payment method
               <select name="method" required>${paymentMethodOptions}</select>
             </label>
             <label class="span-6">
               Payment reference (optional)
-              <input type="text" name="reference" placeholder="e.g. bank payment receipt number">
+              <input type="text" name="reference" placeholder="e.g. bank payment receipt number" value="${escapeHtml(defaultReference)}">
             </label>
             <label class="span-6">
               Proof of payment document ID (optional)
@@ -2745,7 +3039,7 @@ app.get('/payments', isAuthenticated, async (req, res) => {
             </label>
             <div class="span-12" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
               <p class="hint"><strong>Important:</strong> Bank transfers stay in <em>Verifying payment</em> status until the admin team approves them.</p>
-              <button type="submit" class="btn">Submit payment request</button>
+              <button type="submit" class="btn">${isValidRequest ? 'Submit settlement of this request' : 'Submit payment request'}</button>
             </div>
           </form>
         </section>
@@ -2785,7 +3079,14 @@ app.get('/payments', isAuthenticated, async (req, res) => {
 
 app.post('/payments/create', isAuthenticated, async (req, res) => {
   const approval = await getDocumentApprovalStatusForUser(req.user);
-  if (!approval.paymentUnlocked) {
+  const rawRequestId = normalizeValue(req.body.requestId);
+  const targetRequest = rawRequestId ? await getPaymentById(rawRequestId) : null;
+  const isOwnRequest = targetRequest
+    && ((targetRequest.ownerUid && req.user.uid && targetRequest.ownerUid === req.user.uid)
+      || (targetRequest.ownerEmail && req.user.email && targetRequest.ownerEmail.toLowerCase() === normalizeValue(req.user.email).toLowerCase()))
+    && (targetRequest.status === 'requested' || targetRequest.status === 'in_review');
+
+  if (!approval.paymentUnlocked && !isOwnRequest) {
     return res.redirect(buildRedirect('/payments', { error: approval.summary || 'Payment is locked until documents are approved.' }));
   }
   const method = normalizeValue(req.body.method);
@@ -2797,16 +3098,17 @@ app.post('/payments/create', isAuthenticated, async (req, res) => {
   }
   if (method === 'bank') {
     const proofs = proofDocumentId ? [await getDocumentById(proofDocumentId)].filter(Boolean) : [];
-    const approvedUserDocs = approval.documents || [];
     const ownerProof = proofs.find(
       doc => (doc.ownerUid && doc.ownerUid === req.user.uid) || (doc.ownerEmail && doc.ownerEmail.toLowerCase() === normalizeValue(req.user.email).toLowerCase())
     );
     if (!ownerProof && !reference) {
-      return res.redirect(buildRedirect('/payments', { error: 'Please include a payment reference or upload/upload a proof of payment first.' }));
+      return res.redirect(buildRedirect('/payments', { error: 'Please include a payment reference or upload a proof of payment first.' }));
     }
   }
   try {
-    await createPaymentRecord({
+    const amountCents = targetRequest && isOwnRequest ? targetRequest.amountCents : APPLICATION_FEE_CENTS;
+    const label = targetRequest && isOwnRequest ? targetRequest.label : APPLICATION_FEE_LABEL;
+    const created = await createPaymentRecord({
       ownerUid: req.user.uid,
       ownerName: req.user.name || req.user.username,
       ownerEmail: req.user.email,
@@ -2814,11 +3116,21 @@ app.post('/payments/create', isAuthenticated, async (req, res) => {
       reference,
       proofDocumentId,
       notes,
+      amountCents,
+      label,
+      relatedRequestId: isOwnRequest ? targetRequest.id : undefined,
     });
+    if (isOwnRequest) {
+      const settleStatus = method === 'card' ? 'paid' : 'in_review';
+      await settleAdminPaymentRequest(targetRequest.id, created.id, settleStatus);
+    }
     const success = method === 'card'
       ? 'Payment recorded successfully (demo card mode). Your payment is confirmed.'
       : 'Bank transfer received. The admin team will verify your payment and update the status.';
-    return res.redirect(buildRedirect('/payments', { success }));
+    return res.redirect(buildRedirect('/payments', {
+      success: isOwnRequest ? `${success} Your admin request has been linked to this payment.` : success,
+      requestId: isOwnRequest ? targetRequest.id : undefined,
+    }));
   } catch (error) {
     return res.redirect(buildRedirect('/payments', { error: error.message || 'Unable to create your payment request.' }));
   }
@@ -3116,11 +3428,17 @@ app.get('/admin', requireAdminSession, async (req, res) => {
           const proofLink = normalizeValue(payment.proofDocumentId)
             ? `<li><strong>Proof of payment</strong><span>Linked document</span><p><a href="/documents/${encodeURIComponent(payment.proofDocumentId)}/download">Download proof document</a></p></li>`
             : '';
+          const requestLine = payment.isAdminRequest
+            ? `<li><strong>Requested by</strong><span>${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}</span><p>${escapeHtml(payment.requestedByName || 'Admin')} · ${escapeHtml(payment.requestedByEmail || 'Admin panel')}${payment.requestNote ? `<br><em>${escapeHtml(payment.requestNote)}</em>` : ''}</p></li>`
+            : '';
+          const dueLine = payment.dueDateMs
+            ? `<li><strong>Due date</strong><span>${escapeHtml(formatDateTime(payment.dueDateMs))}</span><p>Payment must reach the office before this date. After it expires admin may cancel the request.</p></li>`
+            : '';
           return `
             <article class="queue-card doc-review-card" id="payment-${escapeHtml(payment.id)}">
               <div class="queue-top">
                 <div>
-                  <div class="queue-eyebrow">${escapeHtml(methodMeta.label)}</div>
+                  <div class="queue-eyebrow">${escapeHtml(payment.isAdminRequest ? `Admin request · ${methodMeta.label}` : methodMeta.label)}</div>
                   <h3>${escapeHtml(payment.label)} · ${escapeHtml(formatCurrencyCents(payment.amountCents))}</h3>
                   <p class="queue-summary">
                     Applicant: <strong>${escapeHtml(payment.ownerName || payment.ownerEmail || 'Unknown')}</strong>
@@ -3146,6 +3464,8 @@ app.get('/admin', requireAdminSession, async (req, res) => {
                       <span>${escapeHtml(formatDateTime(payment.createdAtMs || payment.updatedAtMs))}</span>
                       <p>${escapeHtml(normalizeValue(payment.notes) || 'No notes provided by the applicant.')}</p>
                     </li>
+                    ${requestLine}
+                    ${dueLine}
                     ${proofLink}
                     ${reviewerNote
                       ? `<li>
@@ -3164,6 +3484,7 @@ app.get('/admin', requireAdminSession, async (req, res) => {
                   <div class="queue-actions">
                     <button type="submit" name="status" value="paid" class="btn btn-approve">Mark Paid</button>
                     <button type="submit" name="status" value="in_review" class="btn btn-review">Mark In Review</button>
+                    ${payment.isAdminRequest ? `<button type="submit" name="status" value="cancelled" class="btn btn-request">Cancel Request</button>` : ''}
                     <button type="submit" name="status" value="rejected" class="btn btn-reject">Reject payment</button>
                   </div>
                 </form>
@@ -3171,7 +3492,58 @@ app.get('/admin', requireAdminSession, async (req, res) => {
             </article>
           `;
         }).join('')
-      : '<div class="empty-state"><h3>No payment requests yet</h3><p>Users can create payment requests only after their uploaded documents are fully approved.</p></div>';
+      : '<div class="empty-state"><h3>No payment requests yet</h3><p>Users can create payment requests only after their uploaded documents are fully approved. You can also send a payment demand directly from the Request Payment panel below.</p></div>';
+
+    const allPortalUsers = await listPortalUsers();
+    const userSelectOptions = allPortalUsers.length
+      ? allPortalUsers.map(user => {
+          const label = `${user.name || user.username || 'User'} · ${user.email || user.username || ''}${user.username ? ` (${user.username})` : ''}`;
+          const value = JSON.stringify({ uid: user.uid, name: user.name || user.username || '', email: user.email || '' });
+          return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+        }).join('')
+      : '<option value="">No registered users yet</option>';
+    const defaultAmountNaira = (APPLICATION_FEE_CENTS / 100).toFixed(2);
+    const requestPaymentMarkup = `
+      <form class="admin-form request-payment-form" method="POST" action="/admin/payments/request" autocomplete="off">
+        <div class="form-grid">
+          <label class="span-12">
+            Recipient user
+            <select name="targetUser" required>
+              <option value="">Choose the registered user to send the payment request to</option>
+              ${userSelectOptions}
+            </select>
+          </label>
+          <label>
+            Payment label
+            <input type="text" name="label" placeholder="e.g. Biometric enrolment fee" value="${escapeHtml(APPLICATION_FEE_LABEL)}" required>
+          </label>
+          <label>
+            Amount (₦)
+            <input type="number" name="amount" min="0" step="0.01" value="${escapeHtml(defaultAmountNaira)}" required>
+          </label>
+          <label>
+            Reference (optional)
+            <input type="text" name="reference" placeholder="Invoice / demand number (auto-generated if empty)">
+          </label>
+          <label>
+            Due date (optional)
+            <input type="date" name="dueDate">
+          </label>
+          <label class="span-12">
+            Email / dashboard note to the user
+            <textarea name="requestNote" rows="3" placeholder="This message appears in the user's dashboard and acts as the email body. Explain what the payment is for and how to pay."></textarea>
+          </label>
+          <label class="span-12">
+            Internal admin notes (not shown to the user)
+            <textarea name="notes" rows="2" placeholder="Optional: any internal context for your team."></textarea>
+          </label>
+        </div>
+        <p class="hint"><strong>Demo email:</strong> Because no live SMTP server is configured, the request is saved directly to the recipient's dashboard and their email address is recorded in the payment record.</p>
+        <div class="actions">
+          <button type="submit" class="btn btn-approve">Send payment request to user</button>
+        </div>
+      </form>
+    `;
 
     const activityMarkup = latestActivity.length
       ? latestActivity.map(item => `
@@ -3200,6 +3572,7 @@ app.get('/admin', requireAdminSession, async (req, res) => {
         ACTIVITY_MARKUP: activityMarkup,
         DOCUMENT_MARKUP: documentsMarkup,
         PAYMENT_MARKUP: paymentsMarkup,
+        REQUEST_PAYMENT_MARKUP: requestPaymentMarkup,
         APPROVAL_STORAGE_TEXT: escapeHtml(isFirebaseConfigured() ? 'Firestore-backed production storage.' : `Local JSON database at ${LOCAL_DATABASE_FILE}`),
         USER_STORAGE_TEXT: escapeHtml(
           isFirebaseConfigured()
@@ -3211,6 +3584,54 @@ app.get('/admin', requireAdminSession, async (req, res) => {
     );
   } catch (error) {
     res.status(500).send(`Unable to load admin workspace: ${escapeHtml(error.message)}`);
+  }
+});
+
+app.post('/admin/payments/request', requireAdminSession, async (req, res) => {
+  const targetUserRaw = normalizeValue(req.body.targetUser);
+  const label = normalizeValue(req.body.label);
+  const amountRaw = Number(req.body.amount);
+  const reference = normalizeValue(req.body.reference);
+  const dueDate = normalizeValue(req.body.dueDate);
+  const requestNote = normalizeValue(req.body.requestNote);
+  const notes = normalizeValue(req.body.notes);
+
+  if (!targetUserRaw) {
+    return res.redirect(buildRedirect('/admin', { error: 'Please choose the recipient user before sending the payment request.' }));
+  }
+  let target;
+  try {
+    target = JSON.parse(targetUserRaw);
+  } catch (error) {
+    return res.redirect(buildRedirect('/admin', { error: 'Unable to read the selected user.' }));
+  }
+  if (!target || (!target.uid && !target.email)) {
+    return res.redirect(buildRedirect('/admin', { error: 'Selected user is invalid. Please try again.' }));
+  }
+  if (!label) {
+    return res.redirect(buildRedirect('/admin', { error: 'Payment label is required.' }));
+  }
+  if (!Number.isFinite(amountRaw) || amountRaw <= 0) {
+    return res.redirect(buildRedirect('/admin', { error: 'Amount must be a positive number.' }));
+  }
+  const amountCents = Math.round(amountRaw * 100);
+  try {
+    const created = await createAdminPaymentRequest({
+      ownerUid: normalizeValue(target.uid),
+      ownerName: normalizeValue(target.name),
+      ownerEmail: normalizeValue(target.email),
+      label,
+      amountCents,
+      reference,
+      dueDate,
+      requestNote,
+      notes,
+    }, req.user);
+    const recipientLine = created.ownerEmail ? `${created.ownerName || created.ownerUid} · ${created.ownerEmail}` : created.ownerName || created.ownerUid;
+    const success = `Payment demand sent to ${recipientLine} (${escapeHtml(formatCurrencyCents(created.amountCents))}). It now appears on their dashboard under Requests from Admin and is recorded in the email status field.`;
+    res.redirect(buildRedirect('/admin#payment-requests', { success }));
+  } catch (error) {
+    res.redirect(buildRedirect('/admin', { error: error.message || 'Unable to send the payment request.' }));
   }
 });
 

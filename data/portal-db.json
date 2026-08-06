@@ -11,8 +11,8 @@
       "uid": "2e1708b1d1b47f2e43e5ddb1",
       "createdAt": 1785198856497,
       "createdAtMs": 1785198856497,
-      "updatedAtMs": 1785972876595,
-      "updatedAt": 1785972876595
+      "updatedAtMs": 1785980438087,
+      "updatedAt": 1785980438087
     },
     {
       "username": "testuser1785611263",
@@ -20,7 +20,7 @@
       "email": "testuser1785611263@example.com",
       "emailLower": "testuser1785611263@example.com",
       "name": "Test User",
-      "passwordHash": "6371c98c03d511d86fe2d170566e22fbf2af7d1cab626edcc98643f5aa3f8655d906fd45e4819946c8f8ff95a76b73d559bdc71f2d82959341a0f56ac5627244",
+      "passwordHash": "b6f65c568d3c14aaae9d19fdd4c3699322fe681067ee8da74635d5609a935c8671268506ac82b2dbe0d1c076f88a5bd8d76888c0144a147db7d78601a4639fae",
       "passwordSalt": "9d2955955aa98f5bf5bfedfed444eeb6",
       "uid": "53ba78442209612f969bec72",
       "createdAt": 1785607665073,
@@ -41,23 +41,96 @@
       "summary": "New user registration created through the portal and ready for admin review.",
       "documentChecklist": "",
       "requestedStartDate": "",
-      "status": "pending",
+      "status": "needs_info",
       "priority": "medium",
       "submittedAtMs": 1785198856498,
-      "updatedAtMs": 1785198856498,
+      "updatedAtMs": 1785977208129,
       "history": [
         {
           "atMs": 1785198856498,
           "action": "Created",
           "actor": "System",
           "note": "Application added to approval queue."
+        },
+        {
+          "atMs": 1785976330208,
+          "action": "Approved",
+          "actor": "ffclimmigration@gmail.com",
+          "note": "No reviewer note supplied."
+        },
+        {
+          "atMs": 1785977208129,
+          "action": "Requested more information",
+          "actor": "ffclimmigration@gmail.com",
+          "note": "No reviewer note supplied."
         }
       ],
-      "id": "9541752c46333aa6"
+      "id": "9541752c46333aa6",
+      "reviewerName": "ffclimmigration@gmail.com",
+      "reviewerEmail": "ffclimmigration@gmail.com",
+      "reviewerNote": ""
     }
   ],
   "documents": [],
-  "payments": [],
+  "payments": [
+    {
+      "id": "06bf6802796a158b3de08dc4",
+      "ownerUid": "53ba78442209612f969bec72",
+      "ownerName": "Test User",
+      "ownerEmail": "testuser1785611263@example.com",
+      "method": "request",
+      "amountCents": 8500000,
+      "label": "Additional biometric and documentation fee",
+      "reference": "FFCL-REQ-001",
+      "notes": "",
+      "proofDocumentId": "",
+      "relatedRequestId": "06bf6802796a158b3de08dc4",
+      "isAdminRequest": true,
+      "requestedByUid": "2e1708b1d1b47f2e43e5ddb1",
+      "requestedByName": "ffclimmigration@gmail.com",
+      "requestedByEmail": "ffclimmigration@gmail.com",
+      "requestNote": "Dear Test User, please settle this biometric documentation charge within 7 days so we can continue processing your application.",
+      "dueDateMs": null,
+      "emailSent": true,
+      "emailStatus": "demo only (saved to dashboard)",
+      "status": "settled",
+      "reviewerName": "",
+      "reviewerEmail": "",
+      "reviewerNote": "",
+      "reviewedAtMs": null,
+      "createdAtMs": 1785979044119,
+      "updatedAtMs": 1785980306180,
+      "relatedPaymentId": "0ef8c73fe8d0c6988d1fd59d"
+    },
+    {
+      "id": "0ef8c73fe8d0c6988d1fd59d",
+      "ownerUid": "53ba78442209612f969bec72",
+      "ownerName": "Test User",
+      "ownerEmail": "testuser1785611263@example.com",
+      "method": "card",
+      "amountCents": 8500000,
+      "label": "Additional biometric and documentation fee",
+      "reference": "FFCL-REQ-001",
+      "notes": "Settled online via demo card mode. Ref FFCL-REQ-001.",
+      "proofDocumentId": "",
+      "relatedRequestId": "06bf6802796a158b3de08dc4",
+      "isAdminRequest": false,
+      "requestedByUid": "",
+      "requestedByName": "",
+      "requestedByEmail": "",
+      "requestNote": "",
+      "dueDateMs": null,
+      "emailSent": false,
+      "emailStatus": "",
+      "status": "paid",
+      "reviewerName": "Stripe (demo)",
+      "reviewerEmail": "",
+      "reviewerNote": "Payment confirmed in card demo mode.",
+      "reviewedAtMs": 1785980306149,
+      "createdAtMs": 1785980306149,
+      "updatedAtMs": 1785980306180
+    }
+  ],
   "verifications": [
     {
       "email": "ffclimmigration@gmail.com",

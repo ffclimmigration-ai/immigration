@@ -176,7 +176,9 @@
     .table th{color:#8ca3c4;font-size:12px;text-transform:uppercase;letter-spacing:.08em}
     .admin-form{display:grid;gap:14px}
     .admin-form label{display:grid;gap:8px;font-size:13px;font-weight:700;color:#eaf2ff}
-    .admin-form input{
+    .admin-form input,
+    .admin-form select,
+    .admin-form textarea{
       width:100%;
       border-radius:16px;
       border:1px solid rgba(255,255,255,.08);
@@ -185,7 +187,15 @@
       padding:14px 16px;
       font:inherit;
     }
-    .admin-form input:focus{outline:none;border-color:rgba(255,106,26,.48);box-shadow:0 0 0 3px rgba(255,106,26,.12)}
+    .admin-form input:focus,
+    .admin-form select:focus,
+    .admin-form textarea:focus{outline:none;border-color:rgba(255,106,26,.48);box-shadow:0 0 0 3px rgba(255,106,26,.12)}
+    .admin-form .form-grid{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:14px}
+    .admin-form .form-grid label{grid-column:span 12 / span 12}
+    @media (min-width:900px){
+      .admin-form .form-grid label{grid-column:span 6 / span 6}
+      .admin-form .form-grid label.span-12{grid-column:span 12 / span 12}
+    }
     .admin-form .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:6px}
     .admin-form .hint{margin:0;font-size:12px;color:var(--muted);line-height:1.6}
     .code-chip{
@@ -260,6 +270,7 @@
         <a href="#queue"><strong>Approval Queue</strong><span>Review pending, in-progress, and resolved items.</span></a>
         <a href="#documents"><strong>Documents</strong><span>Review user uploads, approve or reject each file.</span></a>
         <a href="#payments"><strong>Payments</strong><span>Approve bank transfers, verify proof of payment.</span></a>
+        <a href="#payment-requests"><strong>Request payment</strong><span>Send a payment demand to a user dashboard + email.</span></a>
         <a href="#users"><strong>Portal Users</strong><span>Track registrations and access activity.</span></a>
         <a href="#verification-codes"><strong>Verification Codes</strong><span>Monitor signup codes as they are issued.</span></a>
         <a href="#activity"><strong>Activity Feed</strong><span>Audit trail of recent admin actions.</span></a>
@@ -384,6 +395,12 @@
                 <button type="submit" class="btn btn-approve">Create User</button>
               </div>
             </form>
+          </section>
+
+          <section class="panel" id="payment-requests">
+            <h3>Request payment from a user</h3>
+            <p class="lead">Send a payment demand directly to a user's dashboard and email address. The user sees the request in a dedicated "Requests from Admin" panel and can settle it from the payment options page.</p>
+            {{REQUEST_PAYMENT_MARKUP}}
           </section>
 
           <section class="panel" id="verification-codes">
