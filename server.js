@@ -30,6 +30,55 @@ const MAX_DOCUMENT_SIZE_BYTES = 12 * 1024 * 1024;
 const ALLOWED_DOCUMENT_EXTENSIONS = new Set([
   '.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx', '.txt', '.rtf',
 ]);
+
+const STORAGE_FORCE_IN_MEMORY = process.env.STORAGE_FORCE_IN_MEMORY === '1'
+  || process.env.STORAGE_FORCE_IN_MEMORY?.toLowerCase() === 'true';
+let STORAGE_LOCAL_JSON_WRITABLE = !STORAGE_FORCE_IN_MEMORY;
+let STORAGE_LOCAL_UPLOAD_WRITABLE = !STORAGE_FORCE_IN_MEMORY;
+let STORAGE_LOCAL_LAST_ERROR = '';
+
+function tryMkdirWritable(targetDir, label) {
+  if (STORAGE_FORCE_IN_MEMORY) {
+    return false;
+  }
+  try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true, mode: 0o755 });
+    }
+    const stat = fs.statSync(targetDir);
+    if (!stat.isDirectory()) {
+      throw new Error(`${targetDir} is not a directory`);
+    }
+    const probe = path.join(targetDir, `.probe-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (error) {
+    STORAGE_LOCAL_LAST_ERROR = `[${label}] ${error.message || error}`;
+    console.warn(`[storage] ${label} UNAVAILABLE (${targetDir}). Reason: ${error.message || error}. Falling back to in-memory + Firestore base64 payload where possible.`);
+    return false;
+  }
+}
+
+function tryWriteFileProbe(targetPath, label) {
+  if (STORAGE_FORCE_IN_MEMORY) {
+    return false;
+  }
+  try {
+    const parent = path.dirname(targetPath);
+    if (!tryMkdirWritable(parent, `${label}-mkdir`)) {
+      return false;
+    }
+    const probe = `${targetPath}.probe-${Date.now()}`;
+    fs.writeFileSync(probe, 'probe', 'utf8');
+    fs.unlinkSync(probe);
+    return true;
+  } catch (error) {
+    STORAGE_LOCAL_LAST_ERROR = `[${label}] ${error.message || error}`;
+    console.warn(`[storage] ${label} write probe failed (${targetPath}). Reason: ${error.message || error}`);
+    return false;
+  }
+}
 const REQUIRED_DOCUMENT_TYPES = [
   'Passport',
   'Proof of identity',
@@ -89,13 +138,19 @@ app.use(bodyParser.json());
 app.use(cookieParser());
 
 app.get('/healthz', (req, res) => {
-  const storageMode = isFirebaseConfigured() ? 'firestore' : 'local-json';
+  const storageMode = isFirebaseConfigured()
+    ? 'firestore'
+    : (STORAGE_FORCE_IN_MEMORY ? 'in_memory' : 'local-json');
   res.status(200).json({
     status: 'ok',
     timeMs: Date.now(),
     uptimeSeconds: process.uptime(),
     storage: {
       mode: storageMode,
+      forceInMemory: Boolean(STORAGE_FORCE_IN_MEMORY),
+      jsonWritable: Boolean(STORAGE_LOCAL_JSON_WRITABLE),
+      uploadWritable: Boolean(STORAGE_LOCAL_UPLOAD_WRITABLE),
+      lastError: STORAGE_LOCAL_LAST_ERROR || '',
       databaseFile: LOCAL_DATABASE_FILE,
       uploadDir: DOCUMENT_UPLOAD_DIR,
       renderDiskRoot: process.env.RENDER_DISK_ROOT || '',
@@ -321,21 +376,50 @@ function getDefaultLocalDatabase() {
 }
 
 function ensureLocalDatabaseFile() {
+  if (STORAGE_FORCE_IN_MEMORY) {
+    return false;
+  }
   const directory = path.dirname(LOCAL_DATABASE_FILE);
-  if (!fs.existsSync(directory)) {
-    fs.mkdirSync(directory, { recursive: true });
+  if (!tryMkdirWritable(directory, 'db-dir')) {
+    STORAGE_LOCAL_JSON_WRITABLE = false;
+    return false;
   }
 
-  if (!fs.existsSync(LOCAL_DATABASE_FILE)) {
-    fs.writeFileSync(
-      LOCAL_DATABASE_FILE,
-      JSON.stringify(getDefaultLocalDatabase(), null, 2),
-      'utf8'
-    );
+  try {
+    if (!fs.existsSync(LOCAL_DATABASE_FILE)) {
+      fs.writeFileSync(
+        LOCAL_DATABASE_FILE,
+        JSON.stringify(getDefaultLocalDatabase(), null, 2),
+        'utf8'
+      );
+    }
+    STORAGE_LOCAL_JSON_WRITABLE = true;
+    return true;
+  } catch (error) {
+    STORAGE_LOCAL_JSON_WRITABLE = false;
+    STORAGE_LOCAL_LAST_ERROR = `[db-file] ${error.message || error}`;
+    console.warn('[storage] ensureLocalDatabaseFile: JSON file NOT writable, switching to in-memory only mode. Reason:', error.message || error);
+    return false;
   }
 }
 
 function readLocalDatabase() {
+  if (STORAGE_FORCE_IN_MEMORY || !STORAGE_LOCAL_JSON_WRITABLE) {
+    try {
+      const raw = fs.readFileSync(LOCAL_DATABASE_FILE, 'utf8');
+      const parsed = raw ? JSON.parse(raw) : getDefaultLocalDatabase();
+      return {
+        users: Array.isArray(parsed.users) ? parsed.users : [],
+        applications: Array.isArray(parsed.applications) ? parsed.applications : [],
+        documents: Array.isArray(parsed.documents) ? parsed.documents : [],
+        payments: Array.isArray(parsed.payments) ? parsed.payments : [],
+        verifications: Array.isArray(parsed.verifications) ? parsed.verifications : [],
+      };
+    } catch (_) {
+      return getDefaultLocalDatabase();
+    }
+  }
+
   ensureLocalDatabaseFile();
 
   try {
@@ -359,22 +443,35 @@ function persistLocalState() {
     return;
   }
 
-  ensureLocalDatabaseFile();
-  fs.writeFileSync(
-    LOCAL_DATABASE_FILE,
-    JSON.stringify(
-      {
-        users: [...demoUsersByUid.values()],
-        applications: [...demoApplications.values()],
-        documents: [...demoDocuments.values()],
-        payments: [...demoPayments.values()],
-        verifications: [...verificationRecords.values()],
-      },
-      null,
-      2
-    ),
-    'utf8'
-  );
+  if (STORAGE_FORCE_IN_MEMORY || !STORAGE_LOCAL_JSON_WRITABLE) {
+    return;
+  }
+
+  if (!ensureLocalDatabaseFile()) {
+    return;
+  }
+
+  try {
+    fs.writeFileSync(
+      LOCAL_DATABASE_FILE,
+      JSON.stringify(
+        {
+          users: [...demoUsersByUid.values()],
+          applications: [...demoApplications.values()],
+          documents: [...demoDocuments.values()],
+          payments: [...demoPayments.values()],
+          verifications: [...verificationRecords.values()],
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+  } catch (error) {
+    STORAGE_LOCAL_JSON_WRITABLE = false;
+    STORAGE_LOCAL_LAST_ERROR = `[persist] ${error.message || error}`;
+    console.warn('[storage] persistLocalState: lost write access, continuing in memory only. Reason:', error.message || error);
+  }
 }
 
 function indexDemoDocument(document) {
@@ -1089,6 +1186,64 @@ function getStorageDocumentPath(id, ext) {
   return path.join(DOCUMENT_UPLOAD_DIR, `${id}${cleanExt}`);
 }
 
+function writeLocalDocumentBytes(id, ext, buffer) {
+  if (!Buffer.isBuffer(buffer)) {
+    return {
+      ok: false,
+      reason: 'empty_buffer',
+    };
+  }
+  const diskPath = getStorageDocumentPath(id, ext);
+  if (!diskPath) {
+    return { ok: false, reason: 'bad_ext' };
+  }
+  if (STORAGE_FORCE_IN_MEMORY || !STORAGE_LOCAL_UPLOAD_WRITABLE) {
+    return { ok: false, reason: 'upload_storage_disabled', storageKind: 'in_memory_base64', payloadBase64: buffer.toString('base64') };
+  }
+  try {
+    fs.writeFileSync(diskPath, buffer);
+    return { ok: true, storageKind: 'local_disk', storageKey: diskPath };
+  } catch (error) {
+    STORAGE_LOCAL_UPLOAD_WRITABLE = false;
+    STORAGE_LOCAL_LAST_ERROR = `[upload-write] ${error.message || error}`;
+    console.warn('[storage] writeLocalDocumentBytes: disk write failed, switching to in-memory base64. Reason:', error.message || error);
+    return {
+      ok: false,
+      reason: 'write_failed',
+      storageKind: 'in_memory_base64',
+      payloadBase64: buffer.toString('base64'),
+    };
+  }
+}
+
+function readLocalDocumentBytes(document) {
+  if (!document) return null;
+  const stored = demoDocuments.get(document.id);
+  const storageKind = normalizeValue(stored?.storageKind || document.storageKind) || 'local_disk';
+  if (storageKind === 'in_memory_base64') {
+    const payload = normalizeValue(stored?.payloadBase64 || document.payloadBase64);
+    if (!payload) return null;
+    try {
+      return Buffer.from(payload, 'base64');
+    } catch (_) {
+      return null;
+    }
+  }
+  const storageKey = normalizeValue(stored?.storageKey || document.storageKey);
+  if (!storageKey || !fs.existsSync(storageKey)) {
+    const fallback = normalizeValue(stored?.payloadBase64 || document.payloadBase64);
+    if (fallback) {
+      try { return Buffer.from(fallback, 'base64'); } catch (_) { /* ignore */ }
+    }
+    return null;
+  }
+  try {
+    return fs.readFileSync(storageKey);
+  } catch (_) {
+    return null;
+  }
+}
+
 function documentToMeta(document) {
   if (!document) return null;
   return {
@@ -1164,16 +1319,15 @@ async function createDocumentRecord(documentData, fileBuffer) {
     return documentToMeta(record);
   }
 
-  const storageKind = 'local_disk';
-  const diskPath = getStorageDocumentPath(id, ext);
-  if (Buffer.isBuffer(fileBuffer) && fileBuffer.length > 0) {
-    fs.writeFileSync(diskPath, fileBuffer);
-  }
+  const diskWrite = writeLocalDocumentBytes(id, ext, fileBuffer);
   const record = {
     ...baseRecord,
-    storageKind,
-    storageKey: diskPath,
+    storageKind: diskWrite.storageKind || (diskWrite.ok ? 'local_disk' : 'in_memory_base64'),
+    storageKey: diskWrite.storageKey || '',
   };
+  if (!diskWrite.ok && diskWrite.payloadBase64) {
+    record.payloadBase64 = diskWrite.payloadBase64;
+  }
   demoDocuments.set(id, record);
   indexDemoDocument(record);
   persistLocalState();
@@ -1226,9 +1380,7 @@ async function getDocumentRawContent(document) {
     if (!base64) return null;
     return Buffer.from(base64, 'base64');
   }
-  const storageKey = normalizeValue(document.storageKey);
-  if (!storageKey || !fs.existsSync(storageKey)) return null;
-  return fs.readFileSync(storageKey);
+  return readLocalDocumentBytes(document);
 }
 
 async function reviewDocument(id, status, reviewer, note) {
@@ -2440,7 +2592,7 @@ app.get('/dashboard', isAuthenticated, async (req, res) => {
           <div class="avatar">${initials}</div>
           <div class="welcome-info">
             <div class="label">Signed in</div>
-            <h2 class="hello">Kia ora, ${displayName}!</h2>
+            <h2 class="hello">KAIAPONI FARMS, ${displayName}!</h2>
             <p class="meta">${userName}<span>|</span>${userEmail}</p>
           </div>
           <span class="status-pill">Account Active</span>
